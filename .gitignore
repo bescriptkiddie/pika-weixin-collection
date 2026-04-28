@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+
+frontend/node_modules/
+frontend/dist/
+
+data/.DS_Store
+data/id_info.json
+data/operation_logs.jsonl
+data/covers/
+data/markdown/
+data/markdown_current/*.zip
