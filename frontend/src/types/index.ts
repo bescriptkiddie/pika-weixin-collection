@@ -97,3 +97,12 @@ export interface CrawlStatus {
   new_articles: number  // 本次新增文章数
   auth_error: boolean   // 是否因凭证失效而终止
 }
+
+// POST /api/wiki/export-sources 的响应
+export interface WikiExportResult {
+  export_root: string
+  raw_sources_dir: string
+  exported: number
+  skipped: number
+  accounts: number
+}

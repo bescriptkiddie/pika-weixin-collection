@@ -41,8 +41,9 @@ import {
   ShieldAlert,
   ShieldOff,
   QrCode,
+  Network,
 } from 'lucide-vue-next'
-import type { CrawlStatus, CachePreview, AuthStatus } from '@/types'
+import type { CrawlStatus, CachePreview, AuthStatus, WikiExportResult } from '@/types'
 import { useArticlesStore } from '@/stores/articles'
 import { useConfigStore } from '@/stores/config'
 
@@ -239,6 +240,31 @@ const crawlStatus = ref<CrawlStatus>({ ...defaultCrawlStatus })
 const crawlStarting = ref(false)  // 点击按钮后到后端确认启动之间的短暂 loading 状态
 const showCrawlBanner = ref(false) // 是否展示进度横幅
 let _pollTimer: ReturnType<typeof setInterval> | null = null
+
+// ── llm_wiki sources 同步 ─────────────────────────────────────────────────
+
+const wikiExporting = ref(false)
+const wikiExportResult = ref<WikiExportResult | null>(null)
+const wikiExportError = ref('')
+
+async function exportWikiSources() {
+  wikiExporting.value = true
+  wikiExportError.value = ''
+  wikiExportResult.value = null
+  try {
+    const res = await fetch('/api/wiki/export-sources', { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) {
+      wikiExportError.value = data.detail || '同步知识库失败'
+      return
+    }
+    wikiExportResult.value = data
+  } catch {
+    wikiExportError.value = '无法连接到后端服务'
+  } finally {
+    wikiExporting.value = false
+  }
+}
 
 /** 轮询爬取进度，爬取完成后自动停止并刷新数据 */
 async function fetchCrawlStatus() {
@@ -645,6 +671,18 @@ async function doCacheClear() {
           <span>{{ authLevel === 'ok' ? '凭证有效' : authLevel === 'warn' ? '可能过期' : '未配置' }}</span>
         </div>
 
+        <!-- llm_wiki export button -->
+        <button
+          @click="exportWikiSources"
+          :disabled="wikiExporting"
+          class="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+          title="同步为 llm_wiki raw sources"
+        >
+          <Loader2 v-if="wikiExporting" class="h-3.5 w-3.5 animate-spin" />
+          <Network v-else class="h-3.5 w-3.5" />
+          {{ wikiExporting ? '同步中' : '同步知识库' }}
+        </button>
+
         <!-- Cache clear button -->
         <button
           @click="openCacheModal"
@@ -730,6 +768,38 @@ async function doCacheClear() {
               >{{ err }}</p>
             </div>
           </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- llm_wiki export result banner -->
+    <Transition name="slide-down">
+      <div
+        v-if="wikiExportResult || wikiExportError"
+        class="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-card)] px-6 py-2.5"
+      >
+        <div class="flex items-start gap-2">
+          <CircleCheck v-if="wikiExportResult" class="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
+          <AlertCircle v-else class="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-medium text-[var(--color-foreground)]">
+              <template v-if="wikiExportResult">
+                已同步 {{ wikiExportResult.exported }} 篇文章到知识库 sources
+              </template>
+              <template v-else>
+                {{ wikiExportError }}
+              </template>
+            </p>
+            <p v-if="wikiExportResult" class="truncate text-[11px] text-[var(--color-muted-foreground)]">
+              {{ wikiExportResult.raw_sources_dir }}
+            </p>
+          </div>
+          <button
+            @click="wikiExportResult = null; wikiExportError = ''"
+            class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+          >
+            <X class="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
     </Transition>

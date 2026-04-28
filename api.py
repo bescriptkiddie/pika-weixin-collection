@@ -115,6 +115,15 @@ class CrawlStatus(BaseModel):
     auth_error: bool = False  # True 表示因凭证失效而提前终止
 
 
+class WikiExportResult(BaseModel):
+    """llm_wiki source 导出结果。"""
+    export_root: str
+    raw_sources_dir: str
+    exported: int
+    skipped: int
+    accounts: int
+
+
 # ── 日志系统 ────────────────────────────────────────────────────────────────────
 # 操作日志使用 JSONL 格式（每行一条 JSON），追加写入，不会覆盖历史。
 # _log_lock 保证多线程同时写日志时不会出现文件内容交叉。
@@ -129,6 +138,7 @@ LOG_ACCOUNT_ADD    = "account_add"
 LOG_ACCOUNT_REMOVE = "account_remove"
 LOG_CACHE_CLEAR    = "cache_clear"
 LOG_ARTICLE_DELETE = "article_delete"
+LOG_WIKI_EXPORT    = "wiki_export"
 
 
 def _append_log(log_type: str, message: str, details: dict | None = None) -> None:
@@ -732,6 +742,28 @@ def start_crawl():
 def get_crawl_status():
     """返回当前爬取任务的实时进度，前端每隔 800ms 轮询一次。"""
     return CrawlStatus(**_crawl_state)
+
+
+@app.post("/api/wiki/export-sources", response_model=WikiExportResult)
+def export_wiki_sources():
+    """
+    将当前已采集文章导出为 llm_wiki 兼容的 raw sources。
+
+    这是桌面知识库分支的第一层桥接：采集仍由本项目负责，后续 ingest
+    可以读取 data/llm_wiki/wechat_oa/raw/sources/wechat 下的 Markdown。
+    """
+    try:
+        from src.llm_wiki_bridge import export_llm_wiki_sources
+
+        result = export_llm_wiki_sources()
+        _append_log(
+            LOG_WIKI_EXPORT,
+            f"同步 llm_wiki sources：{result.exported} 篇文章",
+            result.__dict__,
+        )
+        return WikiExportResult(**result.__dict__)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出 llm_wiki sources 失败：{e}")
 
 
 # ── 缓存清理 ─────────────────────────────────────────────────────────────────────
