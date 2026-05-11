@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { Rss, Settings, ScrollText, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Rss, Settings, ScrollText, ChevronLeft, ChevronRight, Workflow } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
 import { useConfigStore } from '@/stores/config'
 import ThemeToggle from './ThemeToggle.vue'
@@ -24,6 +24,7 @@ const configStore = useConfigStore()
 
 const navItems = [
   { name: '文章', icon: Rss, path: '/' },
+  { name: '闭环', icon: Workflow, path: '/loop' },
   { name: '配置', icon: Settings, path: '/config' },
   { name: '日志', icon: ScrollText, path: '/logs' },
 ]

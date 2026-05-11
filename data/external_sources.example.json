@@ -1,0 +1,56 @@
+{
+  "sources": [
+    {
+      "id": "horizon",
+      "type": "github_repo",
+      "name": "Horizon",
+      "url": "https://github.com/Thysrael/Horizon",
+      "enabled": true,
+      "human_reason": "作为人机共创内容闭环的外部项目参考源，用于跟踪 README、docs 和 releases 中的产品/架构变化。",
+      "options": {
+        "include": ["README", "docs", "releases"],
+        "docs_paths": ["docs"],
+        "max_docs": 20,
+        "max_releases": 10,
+        "snapshot_raw_sources": false,
+        "tags": ["GitHub", "外部源", "内容闭环"],
+        "initial_score": 0.6
+      }
+    },
+    {
+      "id": "bilibili-milai-duoduo",
+      "type": "bilibili_video",
+      "name": "米来哆哆：题材里面重个股",
+      "url": "https://www.bilibili.com/video/BV1jb5767ECK/",
+      "enabled": false,
+      "human_reason": "把常看的 B 站视频转成可检索文本，再进入内容池做摘要、标签和复盘。",
+      "options": {
+        "transcribe": true,
+        "asr_provider": "xiaomi_omni",
+        "asr_model": "mimo-v2-omni",
+        "language": "zh",
+        "snapshot_raw_sources": true,
+        "tags": ["B站", "视频转写", "投资复盘"],
+        "initial_score": 0.7
+      }
+    },
+    {
+      "id": "npr-planet-money",
+      "type": "podcast_feed",
+      "name": "Planet Money",
+      "url": "https://feeds.npr.org/510289/podcast.xml",
+      "enabled": false,
+      "human_reason": "验证播客 RSS 能进入统一内容池；需要转写音频时把 transcribe 改成 true。",
+      "options": {
+        "max_items": 3,
+        "transcribe": false,
+        "asr_provider": "xiaomi_omni",
+        "asr_model": "mimo-v2-omni",
+        "language": "en",
+        "snapshot_raw_sources": true,
+        "tags": ["播客", "外部源"],
+        "initial_score": 0.55
+      }
+    }
+  ]
+}

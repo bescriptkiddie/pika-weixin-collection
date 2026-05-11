@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 .venv/
+.env
+.env.*
+!.env.example
 
 frontend/node_modules/
 frontend/dist/
@@ -10,5 +13,14 @@ data/.DS_Store
 data/id_info.json
 data/operation_logs.jsonl
 data/covers/
+data/media_cache/
+data/content_items.jsonl
+data/feedback_events.jsonl
+data/topic_tags.jsonl
+data/external_sources.json
+data/tag_taxonomy.json
+data/llm_wiki/
 data/markdown/
+data/markdown_current/
 data/markdown_current/*.zip
+outputs/

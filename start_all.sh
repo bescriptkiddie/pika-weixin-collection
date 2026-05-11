@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT_DIR"
 
+if [ -f "$ROOT_DIR/.env.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env.local"
+  set +a
+  echo "[env] 已加载 .env.local"
+fi
+
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+
 # 可在执行前 export QWEN35_27B_ENDPOINT 启用大模型打标签。
 # 未设置时保持为空，让爬取流程跳过打标签，避免不可用的默认网关拖慢抓取。
 if [ -n "${QWEN35_27B_ENDPOINT:-}" ]; then
@@ -14,14 +25,14 @@ else
   echo "[env] QWEN35_27B_ENDPOINT 未设置，跳过 LLM 打标签"
 fi
 
-echo "[start] 启动后端: http://127.0.0.1:8000"
-uv run uvicorn api:app --reload --port 8000 &
+echo "[start] 启动后端: http://127.0.0.1:${BACKEND_PORT}"
+uv run uvicorn api:app --reload --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 
-echo "[start] 启动前端: http://127.0.0.1:5173"
+echo "[start] 启动前端: http://127.0.0.1:${FRONTEND_PORT}"
 (
   cd frontend
-  npm run dev
+  VITE_API_TARGET="http://127.0.0.1:${BACKEND_PORT}" npm run dev -- --host 127.0.0.1 --port "$FRONTEND_PORT"
 ) &
 FRONTEND_PID=$!
 

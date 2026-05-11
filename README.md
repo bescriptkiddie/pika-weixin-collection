@@ -33,6 +33,12 @@ cd frontend && npm install && cd ..
 
 按 `Ctrl+C` 会结束前后端子进程。
 
+如果本机已有服务占用端口，可指定端口：
+
+```bash
+BACKEND_PORT=8001 FRONTEND_PORT=5174 ./start_all.sh
+```
+
 可选：启动前设置大模型打标地址（见下文「大模型打标签」）；`start_all.sh` 内对 `QWEN35_27B_ENDPOINT` 带有默认值，可按需 `export` 覆盖。
 
 ### 3. 首次使用：微信凭证
@@ -76,6 +82,7 @@ cd frontend && npm run dev
 |----------------|------|
 | **文章信息流** | 卡片 / 列表两种视图；默认按日期分组；关键词搜索、公众号筛选、日期范围、排序与分组；单篇删除（黑名单，再次爬取不入库）；**Feed 界面主题**（奶白磨砂网格 / 清蓝网格 / 粉紫渐变玻璃等）在侧栏底部切换并持久化 |
 | **已读 / 收藏** | 点击文章标为已读；收藏与 FilterBar「全部 / 未读 / 收藏」；已读降低强调、未读圆点 |
+| **内容闭环** | 将公众号缓存同步为 `content_items.jsonl`；按 `external_sources.json` 同步 GitHub、B 站视频、播客 RSS 等外部信源；基于本地词表批量打主题标签；AI 分类总结；人工采纳、改写、深挖、不相关等反馈写入 `feedback_events.jsonl` |
 | **公众号管理（配置页）** | 搜索添加、移除、显示/隐藏；**扫码登录** 写入微信凭证；立即爬取与进度；缓存清理；凭证状态 |
 | **操作日志** | 爬取、账号、清理等记录（JSONL），时间轴与详情 |
 | **主题** | 全局浅色 / 深色 / 跟随系统；Feed 区独立界面预设（与上表「界面主题」一致） |
@@ -91,6 +98,86 @@ cd frontend && npm run dev
 - MinHash+LSH 相似文检测（阈值 0.9 等，见文末实验表）
 - 可选：配置 `QWEN35_27B_ENDPOINT` 后为新文章打 `tags`
 
+### 人机共创内容闭环
+
+内容闭环页面对应 `docs/content_loop_architecture.md` 和 `docs/content_loop_opendesign.html` 的 MVP 落地：
+
+- 公众号缓存 → `POST /api/content-loop/sync-wechat` → `data/content_items.jsonl`
+- 外部信源配置 → `data/external_sources.json` / `data/external_sources.example.json`
+- 前端新增视频/播客 → 内容闭环页粘贴 B 站或播客 RSS 链接 → `POST /api/content-loop/sources`
+- 外部信源同步 → `POST /api/content-loop/sync-external` 或 `scripts/sync_external_sources.py` → `data/content_items.jsonl`
+- 主题标签词表 → `data/tag_taxonomy.json` / `data/tag_taxonomy.example.json`
+- 内容池打标签 → `POST /api/content-loop/tagging` → `data/topic_tags.jsonl`
+- AI 分类总结 → `POST /api/content-loop/ai-enrich` → 写回 `ai_summary`、`ai_tags`、`ai_category`
+- 人工判断 → `POST /api/content-loop/feedback` → `data/feedback_events.jsonl`
+
+AI 分类总结使用 OpenAI-compatible Chat Completions 接口，读取本地环境变量：
+
+```bash
+CONTENT_LOOP_LLM_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
+CONTENT_LOOP_LLM_API_KEY=...
+CONTENT_LOOP_LLM_MODEL=mimo-v2.5-pro
+```
+
+开发启动脚本会自动加载 `.env.local`；该文件已被 `.gitignore` 忽略，不要提交真实 key。
+
+命令行同步外部信源：
+
+```bash
+uv run python scripts/sync_external_sources.py
+uv run python scripts/sync_external_sources.py --source-id bilibili-bv1jb5767eck
+```
+
+命令行批量打标签：
+
+```bash
+uv run python scripts/tag_content_items.py
+```
+
+命令行批量 AI 分类总结：
+
+```bash
+uv run python scripts/ai_enrich_content_items.py --limit 30
+```
+
+如果 `data/external_sources.json` 不存在，脚本会使用 `data/external_sources.example.json` 中的 Horizon 示例源；正式使用时可复制并修改为自己的来源列表。Horizon 被视为 `github_repo` 信源连接器，默认通过 GitHub API 拉取 README、docs 和 releases；只有配置 `options.snapshot_raw_sources=true` 时才额外落 raw snapshot 文件。
+
+当前外部信源类型：
+
+- `github_repo`：通过 GitHub API 同步 README、docs、releases。
+- `bilibili_video`：抓取 B 站视频元信息和官方字幕；无字幕时可下载音频并调用 ASR provider 转写。
+- `podcast_feed`：读取播客 RSS 的节目、shownotes 和音频链接；`options.transcribe=true` 时下载音频并转写。
+
+视频/播客 ASR 配置默认走小米 Omni 云端能力，不在本地跑模型：
+
+```json
+{
+  "id": "bilibili-milai-duoduo",
+  "type": "bilibili_video",
+  "name": "米来哆哆",
+  "url": "https://www.bilibili.com/video/BV1jb5767ECK/",
+  "enabled": true,
+  "options": {
+    "transcribe": true,
+    "asr_provider": "xiaomi_omni",
+    "asr_model": "mimo-v2-omni",
+    "language": "zh",
+    "snapshot_raw_sources": true
+  }
+}
+```
+
+需要在 `.env.local` 配置：
+
+```bash
+CONTENT_LOOP_LLM_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
+CONTENT_LOOP_LLM_API_KEY=...
+WECHATOA_ASR_PROVIDER=xiaomi_omni
+WECHATOA_ASR_MODEL=mimo-v2-omni
+```
+
+当前项目不默认跑本地 ASR 模型；视频和播客音频只负责下载后上传给云端模型转写。
+
 ### 技术栈
 
 **前端：** Vue 3 · TypeScript · Vite · Tailwind CSS v4 · Pinia（持久化）· Vue Router · lucide-vue-next  
@@ -101,13 +188,25 @@ cd frontend && npm run dev
 
 ---
 
+## 规划文档
+
+- [人机共创内容生成闭环](docs/content_loop_architecture.md)：把项目从公众号采集扩展为“人定信息源/话题 -> AI 整理成稿 -> 人审分发 -> 人机反馈调优”的内容生成器。
+- [闭环 HTML 设计稿](docs/content_loop_opendesign.html)：用于确认人机共创逻辑、Horizon 接入位置和 MVP 实现顺序。
+- [Tauri + llm_wiki 分支说明](docs/tauri_llm_wiki_branch.md)：桌面壳与 llm_wiki sources 导出方向。
+
+---
+
 ## 目录结构
 
 ```
 pika-weixin-collection/
 ├── start_all.sh             # 一键启动前后端（开发）
 ├── scripts/
-│   └── daily_update.sh      # 个人环境用定时/发布脚本示例（路径需自行改）
+│   ├── daily_update.sh      # 个人环境用定时/发布脚本示例（路径需自行改）
+│   ├── ai_enrich_content_items.py
+│   ├── import_external_sources.py
+│   ├── sync_external_sources.py
+│   └── tag_content_items.py
 ├── api.py                   # FastAPI：账号、爬取、缓存、凭证、日志等
 ├── pyproject.toml           # Python 依赖（uv）
 ├── data/
@@ -115,10 +214,16 @@ pika-weixin-collection/
 │   ├── name2fakeid.json     # 已添加公众号
 │   ├── message_info.json    # 文章主数据
 │   ├── message_detail_text.json  # 正文缓存（若启用）
+│   ├── external_sources.example.json
+│   ├── tag_taxonomy.example.json
+│   ├── content_items.jsonl       # 内容闭环统一内容池（接口/脚本生成）
+│   ├── topic_tags.jsonl          # 内容池主题标签明细（接口/脚本生成）
+│   ├── feedback_events.jsonl     # 人工反馈事件（接口生成）
 │   ├── deleted_article_ids.json
 │   ├── covers/              # 封面图缓存
 │   └── operation_logs.jsonl
 ├── src/
+│   ├── content_loop/             # 外部源、统一内容池、反馈回写
 │   ├── crawler/
 │   │   └── wechat_request.py
 │   ├── llm/
@@ -141,6 +246,7 @@ pika-weixin-collection/
         │   └── ui/
         └── views/
             ├── FeedView.vue
+            ├── ContentLoopView.vue
             ├── ConfigView.vue
             └── LogView.vue
 ```
