@@ -115,6 +115,64 @@ class CrawlStatus(BaseModel):
     auth_error: bool = False  # True 表示因凭证失效而提前终止
 
 
+class WikiExportResult(BaseModel):
+    """llm_wiki source 导出结果。"""
+    export_root: str
+    raw_sources_dir: str
+    exported: int
+    skipped: int
+    accounts: int
+
+
+class ExternalSyncRequest(BaseModel):
+    """同步外部信源的请求体。"""
+    config_path: str | None = None
+    export_root: str | None = None
+    use_example: bool = True
+    source_ids: list[str] | None = None
+
+
+ExternalImportRequest = ExternalSyncRequest
+
+
+class ExternalSourceUpsertRequest(BaseModel):
+    """新增或更新 B 站视频 / 播客 RSS 信源。"""
+    url: str
+    source_type: str = "auto"
+    name: str = ""
+    human_reason: str = ""
+    transcribe: bool = True
+    enabled: bool = True
+    sync_now: bool = True
+    tags: list[str] | None = None
+
+
+class FeedbackEventRequest(BaseModel):
+    """人的判断/反馈，写回闭环数据层。"""
+    item_id: str
+    event: str = "item_reviewed"
+    human_decision: str
+    feedback_note: str = ""
+    suggested_action: str = ""
+    channel: str = "local_web"
+    weight: float = 1.0
+
+
+class TaggingRequest(BaseModel):
+    """批量打标签请求。默认使用 data/tag_taxonomy.json 或 example 词表。"""
+    taxonomy_path: str | None = None
+
+
+class AIEnrichRequest(BaseModel):
+    """批量 AI 分类与摘要。默认只处理尚未生成 AI 摘要的内容。"""
+    limit: int = 30
+    only_missing: bool = True
+    source_type: str | None = None
+    tag: str | None = None
+    item_ids: list[str] | None = None
+    max_chars: int = 3200
+
+
 # ── 日志系统 ────────────────────────────────────────────────────────────────────
 # 操作日志使用 JSONL 格式（每行一条 JSON），追加写入，不会覆盖历史。
 # _log_lock 保证多线程同时写日志时不会出现文件内容交叉。
@@ -129,6 +187,14 @@ LOG_ACCOUNT_ADD    = "account_add"
 LOG_ACCOUNT_REMOVE = "account_remove"
 LOG_CACHE_CLEAR    = "cache_clear"
 LOG_ARTICLE_DELETE = "article_delete"
+LOG_WIKI_EXPORT    = "wiki_export"
+LOG_CONTENT_SYNC   = "content_sync"
+LOG_EXTERNAL_SYNC = "external_sync"
+LOG_EXTERNAL_IMPORT = LOG_EXTERNAL_SYNC
+LOG_EXTERNAL_SOURCE_ADD = "external_source_add"
+LOG_FEEDBACK_EVENT = "feedback_event"
+LOG_TAGGING_RUN = "tagging_run"
+LOG_AI_ENRICH = "ai_enrich"
 
 
 def _append_log(log_type: str, message: str, details: dict | None = None) -> None:
@@ -732,6 +798,291 @@ def start_crawl():
 def get_crawl_status():
     """返回当前爬取任务的实时进度，前端每隔 800ms 轮询一次。"""
     return CrawlStatus(**_crawl_state)
+
+
+@app.post("/api/wiki/export-sources", response_model=WikiExportResult)
+def export_wiki_sources():
+    """
+    将当前已采集文章导出为 llm_wiki 兼容的 raw sources。
+
+    这是桌面知识库分支的第一层桥接：采集仍由本项目负责，后续 ingest
+    可以读取 data/llm_wiki/wechat_oa/raw/sources/wechat 下的 Markdown。
+    """
+    try:
+        from src.llm_wiki_bridge import export_llm_wiki_sources
+
+        result = export_llm_wiki_sources()
+        _append_log(
+            LOG_WIKI_EXPORT,
+            f"同步 llm_wiki sources：{result.exported} 篇文章",
+            result.__dict__,
+        )
+        return WikiExportResult(**result.__dict__)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导出 llm_wiki sources 失败：{e}")
+
+
+# ── 内容闭环 API ────────────────────────────────────────────────────────────────
+# 这组接口把公众号缓存、外部源、统一内容池和人工反馈接起来。
+
+@app.get("/api/content-loop/overview")
+def content_loop_overview():
+    """返回内容闭环当前状态：内容池、反馈、外部源配置和公众号候选素材数量。"""
+    from src.content_loop import get_content_loop_overview
+
+    return get_content_loop_overview()
+
+
+@app.get("/api/content-loop/items")
+def content_loop_items(
+    limit: int = 100,
+    source_type: str | None = None,
+    tag: str | None = None,
+    human_decision: str | None = None,
+):
+    """返回统一内容池中的最近条目，默认不返回完整正文，避免前端加载过重。"""
+    from src.content_loop import list_content_items
+
+    return list_content_items(
+        limit=limit,
+        source_type=source_type or None,
+        tag=tag or None,
+        human_decision=human_decision or None,
+    )
+
+
+@app.get("/api/sources")
+def list_unified_sources_api():
+    """聚合公众号和外部源，返回统一 Source 读模型。"""
+    from src.content_loop import list_unified_sources
+
+    return list_unified_sources()
+
+
+@app.get("/api/content-loop/sources")
+def content_loop_sources():
+    """返回外部源配置；若 data/external_sources.json 不存在，会展示 example 方便首次接入。"""
+    from src.content_loop import load_external_source_configs
+
+    return load_external_source_configs(allow_example=True)
+
+
+@app.post("/api/content-loop/sources")
+def content_loop_upsert_source(body: ExternalSourceUpsertRequest):
+    """新增或更新 B 站视频 / 播客 RSS 信源，可立即同步到统一内容池。"""
+    from src.content_loop import SourceConfigError
+
+    try:
+        from src.content_loop import sync_external_sources, upsert_media_source_config
+
+        result = upsert_media_source_config(
+            url=body.url,
+            source_type=body.source_type,
+            name=body.name,
+            human_reason=body.human_reason,
+            transcribe=body.transcribe,
+            tags=body.tags,
+            enabled=body.enabled,
+        )
+        sync_result = None
+        if body.sync_now and body.enabled:
+            sync_result = sync_external_sources(
+                config_path=Path(result["config_path"]),
+                source_ids=[result["source"]["id"]],
+                use_example=False,
+            )
+        payload = {**result, "sync_result": sync_result}
+        action = "新增" if result["created"] else "更新"
+        synced = int((sync_result or {}).get("items_synced") or 0)
+        errors = (sync_result or {}).get("errors") or []
+        _append_log(
+            LOG_EXTERNAL_SOURCE_ADD,
+            f"{action}外部信源：{result['source']['name']}，同步 {synced} 条，错误 {len(errors)} 个",
+            payload,
+        )
+        return payload
+    except SourceConfigError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存外部信源失败：{e}")
+
+
+@app.get("/api/content-loop/tags")
+def content_loop_tags():
+    """返回标签词表、标签覆盖率和当前内容池里的标签分布。"""
+    from src.content_loop import get_tagging_overview
+
+    return get_tagging_overview()
+
+
+@app.post("/api/content-loop/tagging")
+def content_loop_tagging(body: TaggingRequest):
+    """按本地标签词表给 content_items.jsonl 批量打标签，并生成 topic_tags.jsonl。"""
+    try:
+        from src.content_loop import apply_tags_to_content_items
+
+        result = apply_tags_to_content_items(
+            taxonomy_path=Path(body.taxonomy_path) if body.taxonomy_path else None,
+        )
+        payload = result.__dict__
+        _append_log(
+            LOG_TAGGING_RUN,
+            f"内容池打标签：{payload['tagged']}/{payload['total']} 条已覆盖",
+            payload,
+        )
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"内容打标签失败：{e}")
+
+
+@app.get("/api/content-loop/ai-status")
+def content_loop_ai_status():
+    """返回 AI 分类/摘要配置状态，不返回 API key 明文。"""
+    from src.content_loop import get_ai_enrichment_overview
+
+    return get_ai_enrichment_overview()
+
+
+@app.post("/api/content-loop/ai-enrich")
+def content_loop_ai_enrich(body: AIEnrichRequest):
+    """使用配置好的 OpenAI-compatible 模型为内容池生成 AI 摘要与分类。"""
+    if body.limit < 1:
+        raise HTTPException(status_code=400, detail="limit 必须 >= 1")
+    if body.max_chars < 500:
+        raise HTTPException(status_code=400, detail="max_chars 必须 >= 500")
+    try:
+        from src.content_loop import ai_enrich_content_items
+
+        result = ai_enrich_content_items(
+            limit=body.limit,
+            only_missing=body.only_missing,
+            source_type=body.source_type,
+            tag=body.tag,
+            item_ids=body.item_ids,
+            max_chars=body.max_chars,
+        )
+        payload = result.__dict__
+        _append_log(
+            LOG_AI_ENRICH,
+            f"AI 分类总结：处理 {payload['processed']} 条，失败 {payload['failed']} 条",
+            {k: v for k, v in payload.items() if k != "errors"},
+        )
+        return payload
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 分类总结失败：{e}")
+
+
+@app.post("/api/content-loop/sync-wechat")
+def content_loop_sync_wechat():
+    """
+    将现有 message_info/message_detail_text 标准化写入 data/content_items.jsonl。
+
+    这是从公众号单一数据模型迁移到多源 ContentItem 池的兼容入口。
+    """
+    try:
+        from src.content_loop import sync_wechat_content_items
+
+        result = sync_wechat_content_items()
+        _append_log(
+            LOG_CONTENT_SYNC,
+            f"同步公众号内容池：标准化 {result['normalized']} 条，当前总计 {result['total']} 条",
+            result,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步内容池失败：{e}")
+
+
+@app.post("/api/content-loop/sync-external")
+def content_loop_sync_external(body: ExternalSyncRequest):
+    """按 data/external_sources.json 中启用的连接器同步外部信源，并写入 content_items。"""
+    try:
+        from src.content_loop import sync_external_sources
+
+        result = sync_external_sources(
+            config_path=Path(body.config_path) if body.config_path else None,
+            export_root=Path(body.export_root) if body.export_root else None,
+            use_example=body.use_example,
+            source_ids=body.source_ids,
+        )
+        _append_log(
+            LOG_EXTERNAL_SYNC,
+            f"同步外部信源：{result['items_synced']} 条内容，{len(result['errors'])} 个错误",
+            result,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
+
+
+
+
+@app.post("/api/sources/{source_id}/sync")
+def sync_unified_source(source_id: str):
+    """按统一 Source 读模型触发单个信源同步。"""
+    source_key = source_id.strip()
+    if not source_key:
+        raise HTTPException(status_code=400, detail="source_id 不能为空")
+
+    if source_key.startswith("wechat:"):
+        account_name = source_key.split(":", 1)[1]
+        if not account_name:
+            raise HTTPException(status_code=400, detail="无效的公众号 source_id")
+        try:
+            from src.content_loop import sync_wechat_content_items
+
+            result = sync_wechat_content_items()
+            _append_log(
+                LOG_CONTENT_SYNC,
+                f"同步公众号内容池（单源入口）：{account_name}，标准化 {result['normalized']} 条，当前总计 {result['total']} 条",
+                {**result, "source_id": source_key, "source_name": account_name},
+            )
+            return {"source_id": source_key, "source_name": account_name, "source_type": "wechat_account", "result": result}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"同步公众号失败：{e}")
+
+    try:
+        from src.content_loop import sync_external_sources
+
+        result = sync_external_sources(use_example=False, source_ids=[source_key])
+        _append_log(
+            LOG_EXTERNAL_SYNC,
+            f"同步单个外部信源：{source_key}，{result['items_synced']} 条内容，{len(result['errors'])} 个错误",
+            {**result, "source_id": source_key},
+        )
+        return {"source_id": source_key, "source_type": "external_source", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
+
+
+@app.post("/api/content-loop/feedback")
+def content_loop_feedback(body: FeedbackEventRequest):
+    """将人的采纳、改写、继续深挖、不相关等判断写入 feedback_events.jsonl。"""
+    item_id = body.item_id.strip()
+    decision = body.human_decision.strip()
+    if not item_id or not decision:
+        raise HTTPException(status_code=400, detail="item_id 和 human_decision 不能为空")
+
+    try:
+        from src.content_loop import record_feedback_event
+
+        result = record_feedback_event(
+            item_id=item_id,
+            event=body.event.strip() or "item_reviewed",
+            human_decision=decision,
+            feedback_note=body.feedback_note.strip(),
+            suggested_action=body.suggested_action.strip(),
+            channel=body.channel.strip() or "local_web",
+            weight=body.weight,
+        )
+        _append_log(
+            LOG_FEEDBACK_EVENT,
+            f"记录人工反馈：{decision} / {item_id}",
+            result["event"],
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"记录反馈失败：{e}")
 
 
 # ── 缓存清理 ─────────────────────────────────────────────────────────────────────

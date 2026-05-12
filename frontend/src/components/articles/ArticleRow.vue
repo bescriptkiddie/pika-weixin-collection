@@ -11,6 +11,7 @@ import { ExternalLink, Tag, Bot, Bookmark, BookmarkCheck, Trash2, Loader2 } from
 import type { Article } from '@/types'
 import { useReadingStore } from '@/stores/reading'
 import { useArticlesStore } from '@/stores/articles'
+import { recordContentFeedback, wechatContentItemId } from '@/utils/contentLoopFeedback'
 
 const props = defineProps<{
   article: Article & { account: string }
@@ -33,7 +34,15 @@ function handleClick() {
 function toggleBookmark(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
+  const nextBookmarked = !isBookmarked.value
   readingStore.toggleBookmark(props.article.id)
+  void recordContentFeedback({
+    item_id: wechatContentItemId(props.article.id),
+    event: nextBookmarked ? 'article_bookmarked' : 'article_unbookmarked',
+    human_decision: nextBookmarked ? 'dig_deeper' : 'candidate',
+    feedback_note: nextBookmarked ? '用户在列表视图中收藏，值得后续深挖' : '用户取消收藏',
+    suggested_action: nextBookmarked ? 'raise_item_score' : 'neutralize_item_score',
+  })
 }
 
 async function removeArticle(e: MouseEvent) {
@@ -63,6 +72,13 @@ async function removeArticle(e: MouseEvent) {
     }
     readingStore.removeArticleTracking(props.article.id)
     articlesStore.removeArticleLocally(props.article.account, props.article.id)
+    void recordContentFeedback({
+      item_id: wechatContentItemId(props.article.id),
+      event: 'article_removed',
+      human_decision: 'rejected',
+      feedback_note: '用户从本地文章流删除',
+      suggested_action: 'lower_item_score',
+    })
   } catch {
     alert('无法连接后端，请确认 api.py 已启动')
   } finally {

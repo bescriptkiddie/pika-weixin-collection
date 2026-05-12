@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>人机共创内容生成闭环 · Open Design Draft</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f4ef;
+      --paper: #fffdf8;
+      --paper-2: #f0f7f4;
+      --ink: #22231f;
+      --muted: #62665e;
+      --line: #d9d2c4;
+      --green: #0f7b65;
+      --green-soft: #dff1eb;
+      --blue: #225c9d;
+      --blue-soft: #dceafd;
+      --coral: #b64a3b;
+      --coral-soft: #f7dfd9;
+      --amber: #9f6b16;
+      --amber-soft: #f4ead2;
+      --violet: #6e5799;
+      --violet-soft: #ece5f7;
+      --shadow: 0 18px 44px rgba(42, 38, 29, 0.12);
+      --radius: 8px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(34, 35, 31, 0.035) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(34, 35, 31, 0.035) 1px, transparent 1px),
+        var(--bg);
+      background-size: 28px 28px;
+      color: var(--ink);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      min-height: 72px;
+      padding: 16px 28px;
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      align-items: center;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.86);
+      backdrop-filter: blur(16px);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 40px;
+      height: 40px;
+      border: 2px solid var(--ink);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--green-soft);
+      flex: 0 0 auto;
+    }
+
+    .mark span {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 5px solid var(--green);
+      border-right-color: transparent;
+      display: block;
+      transform: rotate(-35deg);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+      font-weight: 760;
+    }
+
+    .subtitle {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      box-shadow: 0 6px 20px rgba(36, 32, 24, 0.06);
+    }
+
+    .tab {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 13px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 160ms ease, color 160ms ease;
+    }
+
+    .tab.active {
+      background: var(--ink);
+      color: #fffdf8;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+      max-width: 1680px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .rail {
+      position: sticky;
+      top: 92px;
+      align-self: start;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel,
+    .stage,
+    .lane,
+    .artifact,
+    .decision,
+    .phase,
+    .source-chip {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: 0 9px 28px rgba(42, 38, 29, 0.08);
+    }
+
+    .panel {
+      padding: 18px;
+    }
+
+    .panel-title {
+      margin: 0 0 12px;
+      font-size: 14px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 750;
+    }
+
+    .north-star {
+      font-size: 24px;
+      line-height: 1.18;
+      font-weight: 760;
+      margin: 0;
+    }
+
+    .small {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--muted);
+      margin: 10px 0 0;
+    }
+
+    .stage-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .stage {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+    }
+
+    .stage:hover,
+    .stage.active {
+      transform: translateY(-1px);
+      border-color: var(--green);
+      background: var(--paper-2);
+    }
+
+    .stage-index {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--paper);
+      background: var(--ink);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .stage-name {
+      font-size: 14px;
+      line-height: 1.2;
+      font-weight: 740;
+    }
+
+    .stage-meta {
+      font-size: 11px;
+      line-height: 1.25;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .status {
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      background: var(--amber-soft);
+      color: #6e4706;
+      white-space: nowrap;
+    }
+
+    .status.ready {
+      background: var(--green-soft);
+      color: #0b5f4c;
+    }
+
+    .canvas {
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .view {
+      display: none;
+      gap: 18px;
+    }
+
+    .view.active {
+      display: grid;
+    }
+
+    .hero-map {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .loop-board {
+      position: relative;
+      overflow: hidden;
+      min-height: 520px;
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        radial-gradient(circle at 25% 22%, rgba(15, 123, 101, 0.12), transparent 34%),
+        radial-gradient(circle at 76% 78%, rgba(34, 92, 157, 0.10), transparent 32%),
+        var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .loop-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .loop-title h2 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .version {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: rgba(255, 253, 248, 0.78);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .loop {
+      position: relative;
+      min-height: 360px;
+      margin-top: 22px;
+    }
+
+    .center-node {
+      position: absolute;
+      left: 50%;
+      top: 51%;
+      transform: translate(-50%, -50%);
+      width: min(260px, 32vw);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 26px;
+      border: 2px solid var(--ink);
+      background: #fffdf8;
+      box-shadow: 0 26px 50px rgba(34, 35, 31, 0.14);
+      z-index: 2;
+    }
+
+    .center-node strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1.08;
+      margin-bottom: 10px;
+    }
+
+    .center-node span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .loop-ring {
+      position: absolute;
+      inset: 12px 6%;
+      border: 2px dashed rgba(34, 35, 31, 0.22);
+      border-radius: 50%;
+    }
+
+    .node {
+      position: absolute;
+      width: 178px;
+      min-height: 92px;
+      padding: 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.94);
+      box-shadow: 0 12px 28px rgba(42, 38, 29, 0.10);
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ink);
+      box-shadow: 0 0 0 5px rgba(34, 35, 31, 0.08);
+    }
+
+    .node h3 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .node p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .n1 { left: 50%; top: 0; transform: translateX(-50%); border-top: 4px solid var(--green); }
+    .n2 { right: 4%; top: 18%; border-top: 4px solid var(--blue); }
+    .n3 { right: 0; bottom: 18%; border-top: 4px solid var(--violet); }
+    .n4 { left: 50%; bottom: 0; transform: translateX(-50%); border-top: 4px solid var(--coral); }
+    .n5 { left: 0; bottom: 18%; border-top: 4px solid var(--amber); }
+    .n6 { left: 4%; top: 18%; border-top: 4px solid var(--blue); }
+
+    .n1::after { left: 50%; bottom: -6px; }
+    .n2::after { left: -5px; top: 50%; }
+    .n3::after { left: -5px; top: 50%; }
+    .n4::after { left: 50%; top: -6px; }
+    .n5::after { right: -5px; top: 50%; }
+    .n6::after { right: -5px; top: 50%; }
+
+    .signal-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .signal {
+      padding: 11px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: rgba(255, 253, 248, 0.72);
+    }
+
+    .signal b {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+
+    .signal span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .detail-card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      display: grid;
+      align-content: start;
+      gap: 18px;
+    }
+
+    .detail-card h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .detail-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fffaf0;
+    }
+
+    .detail-row label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 730;
+    }
+
+    .detail-row div {
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .decision {
+      padding: 15px;
+      min-height: 150px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .decision h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .decision p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .badge {
+      justify-self: start;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 750;
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    .badge.keep {
+      background: var(--green-soft);
+      color: var(--green);
+    }
+
+    .badge.block {
+      background: var(--coral-soft);
+      color: var(--coral);
+    }
+
+    .lanes {
+      display: grid;
+      gap: 12px;
+    }
+
+    .lane {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      gap: 12px;
+      padding: 14px;
+      align-items: center;
+      background: rgba(255, 253, 248, 0.94);
+    }
+
+    .lane h3 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .source-chip {
+      box-shadow: none;
+      padding: 7px 10px;
+      font-size: 12px;
+      line-height: 1.2;
+      background: var(--paper);
+    }
+
+    .source-chip.current {
+      background: var(--green-soft);
+      border-color: rgba(15, 123, 101, 0.32);
+    }
+
+    .source-chip.next {
+      background: var(--blue-soft);
+      border-color: rgba(34, 92, 157, 0.28);
+    }
+
+    .source-chip.later {
+      background: var(--amber-soft);
+      border-color: rgba(159, 107, 22, 0.28);
+    }
+
+    .schema-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .artifact {
+      padding: 14px;
+      box-shadow: none;
+      background: #fffdf8;
+    }
+
+    .artifact h3 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .artifact code {
+      display: block;
+      white-space: pre-wrap;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #31413d;
+      background: #f0f7f4;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(15, 123, 101, 0.18);
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .phase {
+      padding: 16px;
+      min-height: 320px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .phase::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      height: 5px;
+      background: var(--green);
+    }
+
+    .phase:nth-child(2)::before { background: var(--blue); }
+    .phase:nth-child(3)::before { background: var(--amber); }
+    .phase:nth-child(4)::before { background: var(--coral); }
+
+    .phase-num {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fffdf8;
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .phase h3 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.18;
+    }
+
+    .phase ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .callout {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
+      padding: 16px;
+      border: 1px solid rgba(182, 74, 59, 0.22);
+      border-radius: var(--radius);
+      background: var(--coral-soft);
+    }
+
+    .callout::before {
+      content: "";
+      border-radius: 999px;
+      background: var(--coral);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .callout p {
+      margin: 0;
+      color: #6b3028;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .footnote {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      padding: 0 2px 16px;
+    }
+
+    @media (max-width: 1180px) {
+      .workspace,
+      .hero-map {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        position: static;
+      }
+
+      .stage-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .schema-grid,
+      .roadmap,
+      .decision-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        grid-template-columns: 1fr;
+        padding: 14px;
+      }
+
+      .tabs {
+        overflow-x: auto;
+        justify-content: flex-start;
+      }
+
+      .workspace {
+        padding: 12px;
+      }
+
+      .stage-list,
+      .schema-grid,
+      .roadmap,
+      .decision-grid,
+      .signal-strip,
+      .lane {
+        grid-template-columns: 1fr;
+      }
+
+      .loop-board {
+        min-height: auto;
+      }
+
+      .loop {
+        min-height: auto;
+        display: grid;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .loop-ring,
+      .center-node,
+      .node,
+      .node::after {
+        position: static;
+        transform: none;
+      }
+
+      .center-node {
+        width: 100%;
+        aspect-ratio: auto;
+        border-radius: var(--radius);
+      }
+
+      .node {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true"><span></span></div>
+        <div>
+          <h1>人机共创内容生成闭环</h1>
+          <p class="subtitle">Open Design Draft · 人定方向，AI 扩大生产力，人机一起调优</p>
+        </div>
+      </div>
+      <nav class="tabs" aria-label="视图切换">
+        <button class="tab active" data-view-target="overview">闭环地图</button>
+        <button class="tab" data-view-target="human">人机共创</button>
+        <button class="tab" data-view-target="sources">信息源接入</button>
+        <button class="tab" data-view-target="schema">数据模型</button>
+        <button class="tab" data-view-target="roadmap">MVP 路线</button>
+      </nav>
+    </header>
+
+    <section class="workspace">
+      <aside class="rail">
+        <section class="panel">
+          <p class="panel-title">North Star</p>
+          <p class="north-star">从“抓文章”升级为人机共创的内容生成器。</p>
+          <p class="small">人决定信息源、话题、受众和发布边界；AI 负责采集、整理、聚合和草稿生成；人和 AI 再一起复盘调优。</p>
+        </section>
+
+        <section class="panel">
+          <p class="panel-title">闭环阶段</p>
+          <div class="stage-list" id="stageList">
+            <button class="stage active" data-stage="collect">
+              <span class="stage-index">01</span>
+              <span>
+                <span class="stage-name">人定信息源</span>
+                <span class="stage-meta">人选择公众号 / GitHub / RSS / 手动收藏</span>
+              </span>
+              <span class="status ready">已有基础</span>
+            </button>
+            <button class="stage" data-stage="adapter">
+              <span class="stage-index">02</span>
+              <span>
+                <span class="stage-name">AI 采集适配器</span>
+                <span class="stage-meta">不同来源独立抓取和整理</span>
+              </span>
+              <span class="status">需新增</span>
+            </button>
+            <button class="stage" data-stage="pool">
+              <span class="stage-index">03</span>
+              <span>
+                <span class="stage-name">标准内容池</span>
+                <span class="stage-meta">统一字段和去重键</span>
+              </span>
+              <span class="status">需新增</span>
+            </button>
+            <button class="stage" data-stage="wiki">
+              <span class="stage-index">04</span>
+              <span>
+                <span class="stage-name">知识沉淀</span>
+                <span class="stage-meta">raw sources 到 wiki</span>
+              </span>
+              <span class="status ready">已起步</span>
+            </button>
+            <button class="stage" data-stage="generate">
+              <span class="stage-index">05</span>
+              <span>
+                <span class="stage-name">AI 草稿生成</span>
+                <span class="stage-meta">日报 / 长文 / 短帖 / 多版本草稿</span>
+              </span>
+              <span class="status">待实现</span>
+            </button>
+            <button class="stage" data-stage="distribute">
+              <span class="stage-index">06</span>
+              <span>
+                <span class="stage-name">人审分发</span>
+                <span class="stage-meta">确认后进入 Markdown / Pages / 微信草稿</span>
+              </span>
+              <span class="status">待实现</span>
+            </button>
+            <button class="stage" data-stage="feedback">
+              <span class="stage-index">07</span>
+              <span>
+                <span class="stage-name">人机共调</span>
+                <span class="stage-meta">人工备注、采纳、改写和发布效果回流</span>
+              </span>
+              <span class="status">待实现</span>
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="canvas">
+        <section class="view active" id="view-overview">
+          <div class="hero-map">
+            <section class="loop-board">
+              <div class="loop-title">
+                <div>
+                  <h2>把线性的爬虫，改造成由人控制方向的内容生成循环。</h2>
+                  <p class="small">人给方向和判断，AI 给候选和草稿；每一步都产出可检查文件，不依赖某个单一平台。</p>
+                </div>
+                <span class="version">确认版 v0.1</span>
+              </div>
+
+              <div class="loop" aria-label="内容闭环图">
+                <div class="loop-ring" aria-hidden="true"></div>
+                <div class="center-node">
+                  <div>
+                    <strong>人机闭环</strong>
+                    <span>人确定来源、话题和受众，AI 整理成草稿，人审定发布并把修改理由回流到下一轮。</span>
+                  </div>
+                </div>
+                <article class="node n1">
+                  <h3>人定方向</h3>
+                  <p>人选择信息源、话题、受众和本轮要解决的问题。</p>
+                </article>
+                <article class="node n2">
+                  <h3>标准化</h3>
+                  <p>统一成 RawItem / ContentItem，保留来源链路。</p>
+                </article>
+                <article class="node n3">
+                  <h3>知识库</h3>
+                  <p>导出 raw sources，生成 entities、concepts、synthesis。</p>
+                </article>
+                <article class="node n4">
+                  <h3>AI 草稿</h3>
+                  <p>日报、主题复盘、公众号草稿、短内容，多版本可选。</p>
+                </article>
+                <article class="node n5">
+                  <h3>人审分发</h3>
+                  <p>人改写、确认风险和语气后，再接外部渠道。</p>
+                </article>
+                <article class="node n6">
+                  <h3>共调反馈</h3>
+                  <p>采纳、删除、改写理由、发布效果一起回流。</p>
+                </article>
+              </div>
+
+              <div class="signal-strip">
+                <div class="signal"><b>已有资产</b><span>公众号抓取、正文缓存、Markdown 导出、llm_wiki sources。</span></div>
+                <div class="signal"><b>关键缺口</b><span>跨来源内容池、人工决策记录、生成与分发反馈。</span></div>
+                <div class="signal"><b>接入原则</b><span>不要把 GitHub/RSS 伪装成公众号 fakeid。</span></div>
+                <div class="signal"><b>确认重点</b><span>先确认人在每一步的控制点，再写导入和生成代码。</span></div>
+              </div>
+            </section>
+
+            <section class="detail-card" id="stageDetail">
+              <div>
+                <p class="panel-title">当前选中阶段</p>
+                <h2 id="detailTitle">人定信息源</h2>
+                <p class="small" id="detailSummary">人决定哪些来源值得进入系统，AI 不自动扩张信息边界。</p>
+              </div>
+              <div class="detail-grid">
+                <div class="detail-row">
+                  <label>现在</label>
+                  <div id="detailNow">微信公众号已经可抓取，并能导出 Markdown 和 llm_wiki raw sources。</div>
+                </div>
+                <div class="detail-row">
+                  <label>新增</label>
+                  <div id="detailNext">增加 GitHub、RSS、手动收藏等外部源配置，并记录是谁、为什么加入。</div>
+                </div>
+                <div class="detail-row">
+                  <label>产物</label>
+                  <div id="detailOutput">`external_sources.json`、source adapter、raw source files、human_reason。</div>
+                </div>
+              </div>
+              <div class="callout">
+                <div>
+                  <strong>设计判断</strong>
+                  <p id="detailDecision">Horizon 应该由人确认接入理由后，作为 `github_repo` 信息源进入系统，而不是写入 `name2fakeid.json`。</p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="decision-grid">
+            <article class="decision">
+              <span class="badge keep">保留</span>
+              <h3>公众号主链路保持稳定</h3>
+              <p>`name2fakeid.json`、微信凭证、正文缓存和现有前端阅读体验继续保留，不为外部源重构爬虫主逻辑。</p>
+            </article>
+            <article class="decision">
+              <span class="badge">新增</span>
+              <h3>外部源走独立适配器</h3>
+              <p>`Horizon`、RSS、手动链接进入 `external_sources.json`，由人确认来源价值，再由 adapter 输出统一 RawItem。</p>
+            </article>
+            <article class="decision">
+              <span class="badge block">避免</span>
+              <h3>不要把所有东西塞进公众号</h3>
+              <p>用伪 fakeid 会让后续去重、评分、生成、分发都变得混乱。兼容展示可以有，但底层模型要分清。</p>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" id="view-human">
+          <section class="panel">
+            <p class="panel-title">Human In The Loop</p>
+            <p class="north-star">人不是最后的审核人，而是整个系统的控制面。</p>
+            <p class="small">这个产品更像“内容驾驶舱”：人给方向、边界和判断，AI 给候选、聚合、草稿和复盘建议。</p>
+          </section>
+
+          <section class="decision-grid">
+            <article class="decision">
+              <span class="badge keep">人决定</span>
+              <h3>信息源和话题</h3>
+              <p>哪些公众号、仓库、RSS 和手动收藏进入系统，今天要围绕什么问题写，都由人确定。AI 可以建议，但不能自己扩张边界。</p>
+            </article>
+            <article class="decision">
+              <span class="badge">AI 执行</span>
+              <h3>整理和成稿</h3>
+              <p>AI 负责抓取、清洗、去重、摘要、聚类、评分，并按人的话题生成多个版本草稿，而不是替人决定要写什么。</p>
+            </article>
+            <article class="decision">
+              <span class="badge block">人机共调</span>
+              <h3>反馈变成下一轮策略</h3>
+              <p>采纳、删除、改写、继续深挖、不感兴趣和人工备注必须写回后端，影响下一轮排序、选题和模板。</p>
+            </article>
+          </section>
+
+          <section class="schema-grid">
+            <article class="artifact">
+              <h3>TopicBrief</h3>
+              <code>{
+  "topic": "今天 AI 内容工具的趋势",
+  "audience": "公众号读者",
+  "angle": "观察 + 判断",
+  "selected_sources": ["wechat:AGENT橘", "github:horizon"],
+  "human_intent": "找出可复用的产品机会"
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>DraftDecision</h3>
+              <code>{
+  "draft_id": "daily-brief-001",
+  "decision": "rewrite",
+  "reason": "标题太像新闻摘要，缺少观点",
+  "requested_change": "强化结论，减少罗列"
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>FeedbackSignal</h3>
+              <code>{
+  "item_id": "...",
+  "human_decision": "dig_deeper",
+  "feedback_note": "这个方向值得单独写长文",
+  "suggested_action": "raise_source_weight"
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>NextRunPolicy</h3>
+              <code>{
+  "source_weight_delta": {"github:horizon": 0.2},
+  "topic_bias": ["AI agent", "content workflow"],
+  "template_adjustment": "more opinionated"
+}</code>
+            </article>
+          </section>
+
+          <section class="callout">
+            <div>
+              <strong>闭环判定</strong>
+              <p>只要人的反馈能改变下一轮来源权重、素材排序、选题建议或生成模板，它就是闭环；如果只是记录在前端，它仍然是流水线。</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-sources">
+          <section class="panel">
+            <p class="panel-title">Source Strategy</p>
+            <p class="north-star">来源多样化，采集协议分离，输出格式统一。</p>
+            <p class="small">这层的目标是把“能抓什么”从“怎么生成内容”里拆出来。</p>
+          </section>
+
+          <section class="lanes">
+            <article class="lane">
+              <h3>当前来源</h3>
+              <div class="chips">
+                <span class="source-chip current">微信公众号 fakeid</span>
+                <span class="source-chip current">正文缓存</span>
+                <span class="source-chip current">本地 Markdown</span>
+                <span class="source-chip current">llm_wiki raw sources</span>
+              </div>
+            </article>
+            <article class="lane">
+              <h3>第一批新增</h3>
+              <div class="chips">
+                <span class="source-chip next">GitHub Repo: Horizon</span>
+                <span class="source-chip next">RSS / Atom</span>
+                <span class="source-chip next">手动链接收藏</span>
+                <span class="source-chip next">手动 Markdown 导入</span>
+              </div>
+            </article>
+            <article class="lane">
+              <h3>后续扩展</h3>
+              <div class="chips">
+                <span class="source-chip later">HN</span>
+                <span class="source-chip later">Reddit</span>
+                <span class="source-chip later">Telegram</span>
+                <span class="source-chip later">X / Threads</span>
+                <span class="source-chip later">播客文字稿</span>
+              </div>
+            </article>
+          </section>
+
+          <section class="decision-grid">
+            <article class="decision">
+              <span class="badge">Horizon 接入</span>
+              <h3>`github_repo` 适配器</h3>
+              <p>抓 README、docs、releases 或 repo activity，生成 `raw/sources/github/horizon/*.md`。</p>
+            </article>
+            <article class="decision">
+              <span class="badge keep">前端兼容</span>
+              <h3>可展示为 GitHub / Horizon</h3>
+              <p>如果需要出现在现有信息流，做一层展示兼容；但底层不要写进 `name2fakeid.json`。</p>
+            </article>
+            <article class="decision">
+              <span class="badge block">边界</span>
+              <h3>外部源不触碰微信凭证</h3>
+              <p>微信 token/cookie 只服务公众号抓取，外部源适配器不依赖它，避免权限和失败状态互相污染。</p>
+            </article>
+          </section>
+        </section>
+
+        <section class="view" id="view-schema">
+          <section class="panel">
+            <p class="panel-title">Data Contracts</p>
+            <p class="north-star">后面能不能人机共调，取决于有没有记录人的判断。</p>
+            <p class="small">先用 JSON/JSONL 文件落地，之后再迁移数据库也不改变上层生成逻辑。关键是保留 human intent、decision 和 feedback note。</p>
+          </section>
+
+          <section class="schema-grid">
+            <article class="artifact">
+              <h3>SourceConfig</h3>
+              <code>{
+  "id": "horizon",
+  "type": "github_repo",
+  "name": "Horizon",
+  "url": "https://github.com/Thysrael/Horizon",
+  "enabled": true,
+  "options": {
+    "include": ["README", "docs", "releases"]
+  }
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>RawItem</h3>
+              <code>{
+  "id": "github:horizon:readme",
+  "source_id": "horizon",
+  "source_type": "github_repo",
+  "title": "Horizon README",
+  "url": "...",
+  "content_markdown": "...",
+  "fetched_at": "..."
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>ContentItem</h3>
+              <code>{
+  "id": "...",
+  "source_name": "GitHub / Horizon",
+  "published_at": "...",
+  "summary": "...",
+  "tags": ["信息源", "AI"],
+  "score": 0.82,
+  "dedupe_key": "...",
+  "human_decision": "candidate"
+}</code>
+            </article>
+            <article class="artifact">
+              <h3>FeedbackSignal</h3>
+              <code>{
+  "item_id": "...",
+  "event": "draft_reviewed",
+  "human_decision": "rewrite",
+  "feedback_note": "观点不够强",
+  "channel": "local_web",
+  "created_at": "...",
+  "weight": 1.0
+}</code>
+            </article>
+          </section>
+
+          <section class="callout">
+            <div>
+              <strong>数据迁移判断</strong>
+              <p>短期可以兼容 `message_info.json`，但中期应该新增 `content_items.jsonl` 和 `feedback_events.jsonl`。否则来源一多、反馈一多，公众号字段会承载太多非公众号语义。</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="view-roadmap">
+          <section class="panel">
+            <p class="panel-title">Implementation Roadmap</p>
+            <p class="north-star">先把人的控制点落下来，再让 AI 扩展采集和生成。</p>
+            <p class="small">这个顺序能保持现有项目可用，同时让架构逐步从“公众号应用”升级为“人机共创内容生成器”。</p>
+          </section>
+
+          <section class="roadmap">
+            <article class="phase">
+              <span class="phase-num">1</span>
+              <h3>外部源配置</h3>
+              <ul>
+                <li>新增 `external_sources.example.json`</li>
+                <li>配置 `github_repo:horizon`</li>
+                <li>记录人为什么添加这个来源</li>
+              </ul>
+            </article>
+            <article class="phase">
+              <span class="phase-num">2</span>
+              <h3>GitHub 导入脚本</h3>
+              <ul>
+                <li>新增 `scripts/import_external_sources.py`</li>
+                <li>抓 README、docs、releases</li>
+                <li>输出 `raw/sources/github/horizon/*.md`</li>
+              </ul>
+            </article>
+            <article class="phase">
+              <span class="phase-num">3</span>
+              <h3>统一内容池 + 反馈</h3>
+              <ul>
+                <li>新增 `content_items.jsonl`</li>
+                <li>新增 `feedback_events.jsonl`</li>
+                <li>记录采纳、改写、删除和人工备注</li>
+              </ul>
+            </article>
+            <article class="phase">
+              <span class="phase-num">4</span>
+              <h3>草稿工作台</h3>
+              <ul>
+                <li>人输入话题和受众</li>
+                <li>AI 生成多版本草稿</li>
+                <li>人改写确认后再分发</li>
+              </ul>
+            </article>
+          </section>
+        </section>
+
+        <p class="footnote">确认点：这个 HTML 是逻辑设计稿，不是生产页面。通过后再按 MVP 路线逐步写导入、标准化、人工反馈、草稿生成和分发代码。</p>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const details = {
+      collect: {
+        title: "人定信息源",
+        summary: "人决定哪些来源值得进入系统，AI 不自动扩张信息边界。",
+        now: "微信公众号已经可抓取，并能导出 Markdown 和 llm_wiki raw sources。",
+        next: "增加 GitHub、RSS、手动收藏等外部源配置，并记录是谁、为什么加入。",
+        output: "`external_sources.json`、source adapter、raw source files、human_reason。",
+        decision: "Horizon 应该由人确认接入理由后，作为 `github_repo` 信息源进入系统，而不是写入 `name2fakeid.json`。"
+      },
+      adapter: {
+        title: "AI 采集适配器",
+        summary: "每类来源独立实现抓取逻辑，AI 输出统一 RawItem。",
+        now: "微信适配器已经存在：fakeid 拉文章、正文、封面、标签。",
+        next: "新增 GitHub adapter，后续再加 RSS 和手动导入 adapter。",
+        output: "每个 adapter 输出标准 RawItem，保留 source_type 和 source_id。",
+        decision: "适配器是扩展点，不能把所有来源硬塞进微信爬虫。"
+      },
+      pool: {
+        title: "标准内容池",
+        summary: "用统一内容模型承接公众号、GitHub、RSS、手动来源和人的判断。",
+        now: "现有前端主要读取 `message_info.json`，适合公众号但不适合长期多源。",
+        next: "新增 `content_items.jsonl` 和 `feedback_events.jsonl`。",
+        output: "ContentItem、dedupe_key、score、summary、tags、references、human_decision。",
+        decision: "短期可做展示兼容，中期要迁移到统一内容池和反馈事件。"
+      },
+      wiki: {
+        title: "知识沉淀",
+        summary: "把信息流转成可追溯、可检索、可生成的知识库 sources。",
+        now: "`src/llm_wiki_bridge/export_sources.py` 已能导出公众号 raw sources。",
+        next: "让 GitHub/RSS 也输出到 `raw/sources/<source_type>/<source_id>/`。",
+        output: "raw sources、wiki/sources、entities、concepts、synthesis。",
+        decision: "知识库层是生成层的底座，所有输出必须可回溯到 source。"
+      },
+      generate: {
+        title: "AI 草稿生成",
+        summary: "从人的话题意图出发，基于知识库生成多版本草稿。",
+        now: "已有可选 LLM 标签能力，但还没有稳定的成稿管线。",
+        next: "先做人输入 TopicBrief，AI 输出每日简报候选稿，再做主题复盘、公众号草稿和短内容。",
+        output: "TopicBrief、daily brief、topic review、wechat draft、social post、DraftDecision。",
+        decision: "生成必须带来源引用，先出草稿，不默认自动发布。"
+      },
+      distribute: {
+        title: "人审分发",
+        summary: "先由人改写、确认风险和语气，再接本地和外部渠道。",
+        now: "已有本地 Web 阅读界面和 Markdown 导出。",
+        next: "接 GitHub Pages、Webhook、邮件，最后再接公众号草稿箱。",
+        output: "Markdown/HTML、Pages 页面、Webhook 消息、Newsletter、草稿箱。",
+        decision: "分发前保留人工确认，降低账号和内容风险。"
+      },
+      feedback: {
+        title: "人机共调",
+        summary: "把人的采纳、删除、改写理由和发布效果回流到下一轮采集和生成。",
+        now: "前端已有已读、收藏、删除、隐藏公众号等用户行为。",
+        next: "把这些行为和人工备注抽成 FeedbackSignal，并影响来源权重、内容评分和生成模板。",
+        output: "feedback_events、human_decision、feedback_note、source_weight、topic_preference、generation_score。",
+        decision: "没有人工反馈回写就不是闭环，只是自动化流水线。"
+      }
+    };
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((view) => view.classList.remove("active"));
+        tab.classList.add("active");
+        document.getElementById(`view-${tab.dataset.viewTarget}`).classList.add("active");
+      });
+    });
+
+    document.querySelectorAll(".stage").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.stage;
+        const detail = details[key];
+        document.querySelectorAll(".stage").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        document.getElementById("detailTitle").textContent = detail.title;
+        document.getElementById("detailSummary").textContent = detail.summary;
+        document.getElementById("detailNow").textContent = detail.now;
+        document.getElementById("detailNext").textContent = detail.next;
+        document.getElementById("detailOutput").textContent = detail.output;
+        document.getElementById("detailDecision").textContent = detail.decision;
+      });
+    });
+  </script>
+</body>
+</html>

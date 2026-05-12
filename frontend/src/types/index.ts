@@ -97,3 +97,165 @@ export interface CrawlStatus {
   new_articles: number  // 本次新增文章数
   auth_error: boolean   // 是否因凭证失效而终止
 }
+
+// POST /api/wiki/export-sources 的响应
+export interface WikiExportResult {
+  export_root: string
+  raw_sources_dir: string
+  exported: number
+  skipped: number
+  accounts: number
+}
+
+// ── 内容闭环：ContentItem / 外部源 / 反馈统计 ───────────────────────────────
+
+export interface ContentLoopOverview {
+  content_items: number
+  feedback_events: number
+  wechat_candidates: number
+  external_sources: number
+  enabled_external_sources: number
+  source_types: Record<string, number>
+  human_decisions: Record<string, number>
+  tagged_items: number
+  ai_summaries: number
+  ai_tagged: number
+  tag_counts: Record<string, number>
+  auto_tag_counts: Record<string, number>
+  content_items_file: string
+  feedback_events_file: string
+  source_config_file: string
+  source_config_is_example: boolean
+  last_content_pool_update: string
+}
+
+export interface ContentLoopItem {
+  id: string
+  source_type: string
+  source_id: string
+  source_name: string
+  title: string
+  url: string
+  author: string
+  published_at: string
+  fetched_at: string
+  summary: string
+  ai_summary?: string
+  tags: string[]
+  auto_tags?: string[]
+  ai_tags?: string[]
+  ai_category?: string
+  ai_confidence?: number
+  ai_rationale?: string
+  ai_enriched_at?: string
+  tag_scores?: Record<string, number>
+  tag_evidence?: Record<string, string[]>
+  score: number
+  status: string
+  human_decision: string
+  feedback_notes: string[]
+  content_preview: string
+  references: Array<Record<string, unknown>>
+  metadata: Record<string, unknown>
+}
+
+export interface ExternalSourceConfig {
+  id: string
+  type: string
+  name: string
+  url: string
+  enabled: boolean
+  human_reason: string
+  options: Record<string, unknown>
+}
+
+export interface ExternalSourceConfigResponse {
+  path: string
+  using_example: boolean
+  sources: ExternalSourceConfig[]
+}
+
+
+export interface ExternalSourceSyncResult {
+  config_path: string
+  using_example_config: boolean
+  export_root: string
+  sources_total: number
+  sources_selected: number
+  sources_synced: number
+  sources_skipped: number
+  items_synced: number
+  content_pool: Record<string, unknown>
+  source_results: Array<Record<string, unknown>>
+  errors: string[]
+}
+
+export interface UnifiedSourceItem {
+  id: string
+  source_id: string
+  type: string
+  name: string
+  url: string
+  enabled: boolean
+  human_reason: string
+  sync_policy: string
+  last_synced_at: string
+  last_error: string
+  content_count: number
+  latest_item_at: string
+  metadata: Record<string, unknown>
+}
+
+export interface UnifiedSourcesResponse {
+  sources: UnifiedSourceItem[]
+  counts: {
+    total: number
+    wechat_accounts: number
+    external_sources: number
+    enabled: number
+  }
+  external_config_path: string
+  external_config_is_example: boolean
+}
+
+export interface ExternalSourceUpsertResult {
+  config_path: string
+  source: ExternalSourceConfig
+  created: boolean
+  updated: boolean
+  sources_total: number
+  data_dir: string
+  sync_result?: ExternalSourceSyncResult | null
+}
+
+export interface TaxonomyTag {
+  name: string
+  description: string
+  keywords: string[]
+}
+
+export interface TaggingOverview {
+  taxonomy_file: string
+  using_example_taxonomy: boolean
+  taxonomy_tags: TaxonomyTag[]
+  content_items_file: string
+  topic_tags_file: string
+  total_items: number
+  tagged_items: number
+  untagged_items: number
+  topic_mentions: number
+  tag_counts: Record<string, number>
+  auto_tag_counts: Record<string, number>
+}
+
+export interface TaggingResult {
+  content_items_file: string
+  topic_tags_file: string
+  taxonomy_file: string
+  using_example_taxonomy: boolean
+  total: number
+  tagged: number
+  untagged: number
+  updated: number
+  tag_counts: Record<string, number>
+}

@@ -4,17 +4,23 @@ import { Menu } from 'lucide-vue-next'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import { useArticlesStore } from '@/stores/articles'
 import { useConfigStore } from '@/stores/config'
+import { useContentItemsStore } from '@/stores/contentItems'
 
 const articlesStore = useArticlesStore()
 const configStore = useConfigStore()
+const contentItemsStore = useContentItemsStore()
 
 const sidebarCollapsed = ref(false)
 const mobileSidebarOpen = ref(false)
 const selectedAccount = ref('')
+const selectedSourceType = ref('')
 
 onMounted(async () => {
   configStore.initTheme()
-  await articlesStore.loadData()
+  await Promise.all([
+    articlesStore.loadData(),
+    contentItemsStore.loadAll(),
+  ])
 })
 </script>
 
@@ -36,6 +42,7 @@ onMounted(async () => {
       <AppSidebar
         v-model:collapsed="sidebarCollapsed"
         v-model:selectedAccount="selectedAccount"
+        v-model:selectedSourceType="selectedSourceType"
         @click.stop
       />
     </div>
@@ -50,12 +57,14 @@ onMounted(async () => {
         >
           <Menu class="h-5 w-5" />
         </button>
-        <span class="text-sm font-semibold text-[var(--color-foreground)]">微信公众号聚合</span>
+        <span class="text-sm font-semibold text-[var(--color-foreground)]">内容中枢</span>
       </div>
 
       <router-view
         :selected-account="selectedAccount"
+        :selected-source-type="selectedSourceType"
         @update:selectedAccount="selectedAccount = $event"
+        @update:selectedSourceType="selectedSourceType = $event"
         class="flex-1 overflow-hidden"
       />
     </main>

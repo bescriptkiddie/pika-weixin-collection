@@ -8,6 +8,9 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import FeedView from '@/views/FeedView.vue'
 import ConfigView from '@/views/ConfigView.vue'
 import LogView from '@/views/LogView.vue'
+import ContentLoopView from '@/views/ContentLoopView.vue'
+import SourcesView from '@/views/SourcesView.vue'
+import UnifiedContentView from '@/views/UnifiedContentView.vue'
 
 const router = createRouter({
   // createWebHashHistory：URL 形如 http://localhost:5173/#/config
@@ -15,14 +18,29 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     {
-      path: '/',         // 默认首页：文章信息流
+      path: '/',         // 默认首页：统一内容池
+      name: 'home',
+      component: UnifiedContentView,
+    },
+    {
+      path: '/feed',     // 公众号兼容视图
       name: 'feed',
       component: FeedView,
+    },
+    {
+      path: '/sources',    // 统一信源视图
+      name: 'sources',
+      component: SourcesView,
     },
     {
       path: '/config',   // 公众号管理页：添加/删除/爬取/清理
       name: 'config',
       component: ConfigView,
+    },
+    {
+      path: '/loop',     // 人机共创内容闭环：多源内容池与反馈回写
+      name: 'content-loop',
+      component: ContentLoopView,
     },
     {
       path: '/logs',     // 操作日志页：查看历史爬取、清理记录
