@@ -45,23 +45,26 @@
 
 ## 4. 当前系统与目标系统
 
-### 当前已经具备
+### 已落地（现状）
 
-- 公众号采集：`name2fakeid.json`、`message_info.json`、`message_detail_text.json`。
-- 外部信源：`data/external_sources.json` 支持 `github_repo`、`bilibili_video`、`podcast_feed`。
-- 统一内容池：`data/content_items.jsonl`。
-- 内容处理：主题标签、AI 分类总结、反馈事件。
-- 现有 API：`/api/content-loop/*` 已覆盖同步、来源新增、打标、AI enrichment、反馈。
-- 前端闭环页：`ContentLoopView.vue` 已能展示外部信源、内容池和操作入口。
+- 公众号采集链路仍是主链路：`name2fakeid.json`、`message_info.json`、`message_detail_text.json`。
+- 外部信源配置已存在：`data/external_sources.json` 当前支持 `github_repo`、`bilibili_video`、`podcast_feed`。
+- 统一内容池已落地为次级读模型：`data/content_items.jsonl` 已承接公众号同步和部分外部源导入，但还不是首页主数据源。
+- 内容处理已具备基础能力：本地主题标签、AI 分类/摘要、反馈事件写回。
+- 现有内容闭环 API 已覆盖基础操作：`/api/content-loop/overview`、`/items`、`/sources`、`/tags`、`/ai-status`、`/tagging`、`/ai-enrich`、`/sync-wechat`、`/sync-external`、`/feedback`。
+- 前端内容闭环页已落地：`ContentLoopView.vue` 能展示内容池、外部信源和反馈操作。
 
-### 当前主要断点
+### 已落地但还不是主体验
 
-- 首页仍由 `frontend/src/stores/articles.ts` 读取 `/data/message_info.json`，只展示公众号文章。
-- 筛选逻辑仍以公众号为中心，`source_type`、`source_id`、转写状态、AI 状态不是一等筛选条件。
-- 侧边栏和 README 仍强化“公众号聚合”的产品身份。
-- 信源管理分散：公众号在配置页，B 站/播客在内容闭环页，GitHub 主要依赖 JSON。
-- 视频/播客转写是长任务，但目前缺少统一任务队列、进度、重试、取消和失败诊断。
-- 输出层还弱，尚未形成日报、选题、草稿、知识库发布的稳定工作台。
+- 首页仍由 `frontend/src/stores/articles.ts` 读取 `/data/message_info.json`，默认只展示公众号文章。
+- 侧边栏、README 和主要筛选逻辑仍以“公众号聚合”为中心，`source_type`、`source_id`、AI 状态、人工决策还不是首页一等条件。
+- 信源管理入口仍然分散：公众号在配置页，外部源主要在 `/loop`，GitHub 配置仍偏 JSON 驱动。
+
+### 当前未落地
+
+- 独立 Job 服务及 `/api/jobs/*` 还不存在。
+- 输出工作台及 `/api/outputs/*` 还不存在。
+- `job_runs.jsonl`、`job_events.jsonl`、`output_artifacts.jsonl` 仍是后续规划，不应按现状能力使用。
 
 ## 5. 总体架构
 
@@ -201,6 +204,8 @@ FetchedItem
 
 ### 6.3 任务层
 
+任务层是后续必须补上的能力。当前 B 站/播客同步和 AI 处理仍以直接调用现有接口为主，还没有独立 Job 读写模型。
+
 视频、播客、GitHub docs 同步都可能耗时，不能长期依赖一次 HTTP 请求完成。
 
 目标任务模型：
@@ -337,9 +342,28 @@ ContentItem
 
 ## 7. API 设计
 
-短期继续复用现有 `/api/content-loop/*`，同时按目标形态整理新接口边界。
+当前已经落地的接口和目标接口需要分开看。
 
-### 7.1 信源
+### 7.1 当前已落地的内容闭环接口
+
+```text
+GET  /api/content-loop/overview
+GET  /api/content-loop/items
+GET  /api/content-loop/sources
+GET  /api/content-loop/tags
+GET  /api/content-loop/ai-status
+POST /api/content-loop/sources
+POST /api/content-loop/tagging
+POST /api/content-loop/ai-enrich
+POST /api/content-loop/sync-wechat
+POST /api/content-loop/sync-external
+POST /api/content-loop/import-external
+POST /api/content-loop/feedback
+```
+
+这些接口已经足够支撑次入口 `/loop`，也足够支撑 P0 的首页迁移。
+
+### 7.2 目标信源接口边界
 
 ```text
 GET    /api/sources
@@ -356,7 +380,7 @@ POST   /api/sources/{source_id}/sync
 - `POST /api/content-loop/sync-external`
 - `POST /api/content-loop/sync-wechat`
 
-### 7.2 内容池
+### 7.3 目标内容池接口边界
 
 ```text
 GET  /api/content/items
@@ -373,7 +397,7 @@ POST /api/content/items/ai-enrich
 - `POST /api/content-loop/tagging`
 - `POST /api/content-loop/ai-enrich`
 
-### 7.3 任务
+### 7.4 目标任务接口边界
 
 ```text
 GET  /api/jobs
@@ -382,7 +406,12 @@ POST /api/jobs/{job_id}/retry
 POST /api/jobs/{job_id}/cancel
 ```
 
-### 7.4 输出
+说明：
+
+- 当前未实现。
+- 只有在 `job_runs.jsonl`、`job_events.jsonl` 落地后，这组接口才有实际意义。
+
+### 7.5 目标输出接口边界
 
 ```text
 POST /api/outputs/daily-brief
@@ -391,6 +420,11 @@ POST /api/outputs/draft
 POST /api/outputs/export/markdown
 POST /api/outputs/export/llm-wiki
 ```
+
+说明：
+
+- 当前未实现。
+- 应在统一内容池首页、Source 读模型和任务层稳定后再引入。
 
 ## 8. 数据文件规划
 
@@ -408,7 +442,7 @@ data/operation_logs.jsonl
 data/llm_wiki/**
 ```
 
-建议新增：
+建议新增（当前未落地）：
 
 ```text
 data/job_runs.jsonl
@@ -439,9 +473,9 @@ output_artifacts
 
 ### P0：统一内容池成为首页
 
+- 复用现有 `ContentLoopView.vue`，直接把内容池主视图迁到首页，或抽出共享主内容组件。
 - 新建 `useContentItemsStore`，从 `/api/content-loop/items` 读取数据。
-- 新建或改造首页为 `UnifiedContentView`。
-- 筛选条件改为：关键词、来源类型、来源名称、标签、AI 分类、人工决策、日期。
+- 首页筛选条件改为：关键词、来源类型、来源名称、标签、AI 分类、人工决策、日期。
 - 侧边栏品牌从“公众号聚合”改为“信息中枢”或“内容中枢”。
 - 公众号文章流保留为 `source_type=wechat_article` 的筛选视图。
 
@@ -453,7 +487,7 @@ output_artifacts
 
 ### P1：统一信源管理
 
-- 新建“信源”页面，聚合公众号和外部信源。
+- 先收敛“信源”入口，可复用 `/loop` 中已有的外部源管理能力，再逐步合并公众号配置。
 - 支持新增 B 站/播客/GitHub/RSS/手动链接。
 - 每个信源展示：类型、启用状态、最近同步时间、最近错误、内容数量。
 - 支持单个信源立即同步。
@@ -497,9 +531,9 @@ output_artifacts
 
 ### P1：Source 服务
 
-- 抽出 `src/content_loop/sources.py` 聚合 `name2fakeid.json` 和 `external_sources.json`。
-- 给前端提供统一 `Source` 响应。
-- 新增 source 更新、停用、删除的后端函数。
+- 基于现有 `src/content_loop/source_configs.py` 和 `src/content_loop/store.py` 补统一 Source 读模型。
+- 聚合 `name2fakeid.json` 和 `external_sources.json`，给前端提供统一 `Source` 响应。
+- 写接口延后，先把读模型和字段约束收紧，再补更新、停用、删除。
 
 ### P2：Job 服务
 
@@ -578,6 +612,10 @@ CONTENT_LOOP_LLM_API_KEY=...
 第一步只做一件事：让统一内容池成为用户看到的第一屏。
 
 ```text
+frontend/src/router/index.ts
+  当前：`/` 指向 FeedView，`/loop` 指向 ContentLoopView
+  目标：让 `/` 直接承载内容池主视图
+
 frontend/src/stores/articles.ts
   当前：读取 message_info.json
   目标：保留为公众号兼容 store
@@ -585,13 +623,13 @@ frontend/src/stores/articles.ts
 新增 useContentItemsStore
   读取 /api/content-loop/items
 
-FeedView / 新 UnifiedContentView
+优先复用 ContentLoopView.vue
   展示 ContentItem
-  支持 source_type/source_id/tag/decision 筛选
+  逐步抽出首页所需的内容池组件和筛选逻辑
 
 AppSidebar
   品牌改为内容中枢
-  公众号列表改为信源列表或来源筛选
+  公众号列表改为来源筛选
 ```
 
 完成这一步后，B 站、播客、GitHub 才会从“闭环页里的附属能力”变成产品主体验的一部分。

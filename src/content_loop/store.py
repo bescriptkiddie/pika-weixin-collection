@@ -360,6 +360,8 @@ def count_wechat_candidates() -> int:
     return total
 
 
+
+
 def get_content_loop_overview() -> dict[str, Any]:
     items = read_jsonl(CONTENT_ITEMS_FILE)
     feedback_events = read_jsonl(FEEDBACK_EVENTS_FILE)
@@ -395,4 +397,89 @@ def get_content_loop_overview() -> dict[str, Any]:
         "source_config_file": source_configs["path"],
         "source_config_is_example": bool(source_configs["using_example"]),
         "last_content_pool_update": last_update,
+    }
+def list_unified_sources() -> dict[str, Any]:
+    name2fakeid = read_json(DATA_DIR / "name2fakeid.json", {})
+    message_info = read_json(DATA_DIR / "message_info.json", {})
+    external_config = load_external_source_configs(allow_example=True)
+    content_items = read_jsonl(CONTENT_ITEMS_FILE)
+
+    content_counts: Counter[str] = Counter(str(item.get("source_id") or "") for item in content_items if item.get("source_id"))
+    last_published: dict[str, str] = {}
+    for item in content_items:
+        source_id = str(item.get("source_id") or "")
+        published = str(item.get("published_at") or item.get("fetched_at") or "")
+        if source_id and published and published > last_published.get(source_id, ""):
+            last_published[source_id] = published
+
+    wechat_sources: list[dict[str, Any]] = []
+    for name, fakeid in name2fakeid.items():
+        account_data = message_info.get(name, {}) if isinstance(message_info, dict) else {}
+        latest_update_time = str(account_data.get("latest_update_time") or "") if isinstance(account_data, dict) else ""
+        wechat_sources.append(
+            {
+                "id": f"wechat:{name}",
+                "source_id": name,
+                "type": "wechat_account",
+                "name": name,
+                "url": "",
+                "enabled": True,
+                "human_reason": "",
+                "sync_policy": "manual",
+                "last_synced_at": latest_update_time,
+                "last_error": "",
+                "content_count": content_counts.get(name, 0),
+                "latest_item_at": last_published.get(name, ""),
+                "metadata": {
+                    "fakeid": fakeid,
+                    "origin": "name2fakeid.json",
+                },
+            }
+        )
+
+    external_sources: list[dict[str, Any]] = []
+    for source in external_config.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        source_id = str(source.get("id") or "")
+        options = source.get("options") if isinstance(source.get("options"), dict) else {}
+        external_sources.append(
+            {
+                "id": source_id,
+                "source_id": source_id,
+                "type": str(source.get("type") or "unknown"),
+                "name": str(source.get("name") or source_id),
+                "url": str(source.get("url") or ""),
+                "enabled": bool(source.get("enabled", True)),
+                "human_reason": str(source.get("human_reason") or ""),
+                "sync_policy": "manual",
+                "last_synced_at": "",
+                "last_error": "",
+                "content_count": content_counts.get(source_id, 0),
+                "latest_item_at": last_published.get(source_id, ""),
+                "metadata": {
+                    "origin": "external_sources.json",
+                    "options": options,
+                },
+            }
+        )
+
+    sources = sorted(
+        [*wechat_sources, *external_sources],
+        key=lambda row: (
+            str(row.get("type") or ""),
+            str(row.get("name") or ""),
+        ),
+    )
+
+    return {
+        "sources": sources,
+        "counts": {
+            "total": len(sources),
+            "wechat_accounts": len(wechat_sources),
+            "external_sources": len(external_sources),
+            "enabled": sum(1 for source in sources if source.get("enabled")),
+        },
+        "external_config_path": external_config.get("path", str(EXTERNAL_SOURCES_FILE)),
+        "external_config_is_example": bool(external_config.get("using_example")),
     }

@@ -851,6 +851,14 @@ def content_loop_items(
     )
 
 
+@app.get("/api/sources")
+def list_unified_sources_api():
+    """聚合公众号和外部源，返回统一 Source 读模型。"""
+    from src.content_loop import list_unified_sources
+
+    return list_unified_sources()
+
+
 @app.get("/api/content-loop/sources")
 def content_loop_sources():
     """返回外部源配置；若 data/external_sources.json 不存在，会展示 example 方便首次接入。"""
@@ -1007,10 +1015,44 @@ def content_loop_sync_external(body: ExternalSyncRequest):
         raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
 
 
-@app.post("/api/content-loop/import-external")
-def content_loop_import_external(body: ExternalImportRequest):
-    """兼容旧入口；外部仓库现在按信源连接器同步。"""
-    return content_loop_sync_external(body)
+
+
+@app.post("/api/sources/{source_id}/sync")
+def sync_unified_source(source_id: str):
+    """按统一 Source 读模型触发单个信源同步。"""
+    source_key = source_id.strip()
+    if not source_key:
+        raise HTTPException(status_code=400, detail="source_id 不能为空")
+
+    if source_key.startswith("wechat:"):
+        account_name = source_key.split(":", 1)[1]
+        if not account_name:
+            raise HTTPException(status_code=400, detail="无效的公众号 source_id")
+        try:
+            from src.content_loop import sync_wechat_content_items
+
+            result = sync_wechat_content_items()
+            _append_log(
+                LOG_CONTENT_SYNC,
+                f"同步公众号内容池（单源入口）：{account_name}，标准化 {result['normalized']} 条，当前总计 {result['total']} 条",
+                {**result, "source_id": source_key, "source_name": account_name},
+            )
+            return {"source_id": source_key, "source_name": account_name, "source_type": "wechat_account", "result": result}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"同步公众号失败：{e}")
+
+    try:
+        from src.content_loop import sync_external_sources
+
+        result = sync_external_sources(use_example=False, source_ids=[source_key])
+        _append_log(
+            LOG_EXTERNAL_SYNC,
+            f"同步单个外部信源：{source_key}，{result['items_synced']} 条内容，{len(result['errors'])} 个错误",
+            {**result, "source_id": source_key},
+        )
+        return {"source_id": source_key, "source_type": "external_source", "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
 
 
 @app.post("/api/content-loop/feedback")

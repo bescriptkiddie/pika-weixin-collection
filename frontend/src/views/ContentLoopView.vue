@@ -19,32 +19,20 @@ import {
   Workflow,
   XCircle,
 } from 'lucide-vue-next'
-import type {
-  ContentLoopItem,
-  ContentLoopOverview,
-  ExternalSourceConfigResponse,
-  ExternalSourceUpsertResult,
-  TaggingOverview,
-  TaggingResult,
-} from '@/types'
+import { useContentItemsStore } from '@/stores/contentItems'
 
-const overview = ref<ContentLoopOverview | null>(null)
-const items = ref<ContentLoopItem[]>([])
-const sourceConfig = ref<ExternalSourceConfigResponse | null>(null)
-const loading = ref(false)
+const contentItemsStore = useContentItemsStore()
 const syncing = ref(false)
 const syncingExternal = ref(false)
 const tagging = ref(false)
 const aiEnriching = ref(false)
 const addingSource = ref(false)
 const feedbackingId = ref('')
-const error = ref('')
 const addSourceResult = ref('')
 const mediaUrl = ref('')
 const mediaName = ref('')
 const mediaSourceType = ref<'auto' | 'bilibili_video' | 'podcast_feed'>('auto')
 const mediaTranscribe = ref(true)
-const tagOverview = ref<TaggingOverview | null>(null)
 const selectedTag = ref('')
 
 const stages = [
@@ -88,7 +76,12 @@ const stages = [
 
 const activeStageKey = ref(stages[0]!.key)
 const activeStage = computed(() => stages.find((stage) => stage.key === activeStageKey.value) ?? stages[0]!)
-
+const overview = computed(() => contentItemsStore.overview)
+const items = computed(() => contentItemsStore.items)
+const sourceConfig = computed(() => contentItemsStore.sourceConfig)
+const tagOverview = computed(() => contentItemsStore.tagOverview)
+const loading = computed(() => contentItemsStore.loading)
+const error = computed(() => contentItemsStore.error)
 const sourceTypeBreakdown = computed(() => Object.entries(overview.value?.source_types ?? {}))
 const decisionBreakdown = computed(() => Object.entries(overview.value?.human_decisions ?? {}))
 const tagBreakdown = computed(() => Object.entries(tagOverview.value?.tag_counts ?? overview.value?.tag_counts ?? {}))
@@ -103,6 +96,7 @@ function sourceTypeLabel(type: string) {
     github_repo: 'GitHub',
     bilibili_video: 'B站视频',
     podcast_episode: '播客',
+    podcast_feed: '播客',
   }
   return labels[type] ?? type
 }
@@ -119,48 +113,14 @@ function decisionLabel(decision: string) {
   return labels[decision] ?? decision
 }
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
-  const data = (await res.json().catch(() => ({}))) as { detail?: string }
-  if (!res.ok) {
-    throw new Error(data.detail || '请求失败')
-  }
-  return data as T
-}
-
 async function loadAll() {
-  loading.value = true
-  error.value = ''
-  try {
-    const [overviewData, itemsData, sourcesData, tagsData] = await Promise.all([
-      requestJson<ContentLoopOverview>('/api/content-loop/overview'),
-      requestJson<ContentLoopItem[]>('/api/content-loop/items?limit=500'),
-      requestJson<ExternalSourceConfigResponse>('/api/content-loop/sources'),
-      requestJson<TaggingOverview>('/api/content-loop/tags'),
-    ])
-    overview.value = overviewData
-    items.value = itemsData
-    sourceConfig.value = sourcesData
-    tagOverview.value = tagsData
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载失败'
-  } finally {
-    loading.value = false
-  }
+  await contentItemsStore.loadAll()
 }
 
 async function runTagging() {
   tagging.value = true
-  error.value = ''
   try {
-    await requestJson<TaggingResult>('/api/content-loop/tagging', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '打标签失败'
+    await contentItemsStore.runTagging()
   } finally {
     tagging.value = false
   }
@@ -168,21 +128,13 @@ async function runTagging() {
 
 async function runAIEnrichment() {
   aiEnriching.value = true
-  error.value = ''
   try {
-    await requestJson('/api/content-loop/ai-enrich', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        limit: 30,
-        only_missing: true,
-        tag: selectedTag.value || null,
-        max_chars: 3200,
-      }),
+    await contentItemsStore.runAIEnrichment({
+      limit: 30,
+      onlyMissing: true,
+      tag: selectedTag.value || null,
+      maxChars: 3200,
     })
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'AI 分类总结失败'
   } finally {
     aiEnriching.value = false
   }
@@ -190,12 +142,8 @@ async function runAIEnrichment() {
 
 async function syncWechatPool() {
   syncing.value = true
-  error.value = ''
   try {
-    await requestJson('/api/content-loop/sync-wechat', { method: 'POST' })
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步失败'
+    await contentItemsStore.syncWechatPool()
   } finally {
     syncing.value = false
   }
@@ -203,16 +151,8 @@ async function syncWechatPool() {
 
 async function syncExternalSources() {
   syncingExternal.value = true
-  error.value = ''
   try {
-    await requestJson('/api/content-loop/sync-external', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ use_example: true }),
-    })
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步外部信源失败'
+    await contentItemsStore.syncExternalSources({ useExample: true })
   } finally {
     syncingExternal.value = false
   }
@@ -221,24 +161,18 @@ async function syncExternalSources() {
 async function addMediaSource() {
   const url = mediaUrl.value.trim()
   if (!url) {
-    error.value = '先粘贴 B站视频或播客 RSS 链接'
     return
   }
   addingSource.value = true
-  error.value = ''
   addSourceResult.value = ''
   try {
-    const result = await requestJson<ExternalSourceUpsertResult>('/api/content-loop/sources', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url,
-        source_type: mediaSourceType.value,
-        name: mediaName.value.trim(),
-        transcribe: mediaTranscribe.value,
-        sync_now: true,
-        enabled: true,
-      }),
+    const result = await contentItemsStore.addMediaSource({
+      url,
+      sourceType: mediaSourceType.value,
+      name: mediaName.value.trim(),
+      transcribe: mediaTranscribe.value,
+      syncNow: true,
+      enabled: true,
     })
     const errors = result.sync_result?.errors ?? []
     const synced = result.sync_result?.items_synced ?? 0
@@ -248,40 +182,32 @@ async function addMediaSource() {
     mediaUrl.value = ''
     mediaName.value = ''
     mediaSourceType.value = 'auto'
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '新增外部信源失败'
   } finally {
     addingSource.value = false
   }
 }
 
-async function sendFeedback(item: ContentLoopItem, humanDecision: string, suggestedAction: string) {
+async function sendFeedback(item: { id: string }, humanDecision: string, suggestedAction: string) {
   const note = window.prompt('人工备注（可留空）', '')
   if (note === null) return
   feedbackingId.value = item.id
-  error.value = ''
   try {
-    await requestJson('/api/content-loop/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        item_id: item.id,
-        event: 'content_pool_reviewed',
-        human_decision: humanDecision,
-        feedback_note: note,
-        suggested_action: suggestedAction,
-      }),
+    await contentItemsStore.sendFeedback({
+      itemId: item.id,
+      humanDecision,
+      feedbackNote: note,
+      suggestedAction,
     })
-    await loadAll()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '反馈写入失败'
   } finally {
     feedbackingId.value = ''
   }
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  if (!items.value.length) {
+    await loadAll()
+  }
+})
 </script>
 
 <template>

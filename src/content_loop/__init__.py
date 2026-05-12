@@ -20,6 +20,7 @@ from .ai_enrichment import ai_enrich_content_items, get_ai_enrichment_overview
 from .store import (
     get_content_loop_overview,
     list_content_items,
+    list_unified_sources,
     load_external_source_configs,
     record_feedback_event,
     sync_wechat_content_items,
@@ -37,6 +38,7 @@ __all__ = [
     "extract_bilibili_bvid",
     "infer_source_type",
     "list_content_items",
+    "list_unified_sources",
     "load_external_source_configs",
     "normalize_github_connector_references",
     "record_feedback_event",

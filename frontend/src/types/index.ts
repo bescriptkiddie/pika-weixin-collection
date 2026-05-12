@@ -175,6 +175,7 @@ export interface ExternalSourceConfigResponse {
   sources: ExternalSourceConfig[]
 }
 
+
 export interface ExternalSourceSyncResult {
   config_path: string
   using_example_config: boolean
@@ -187,6 +188,34 @@ export interface ExternalSourceSyncResult {
   content_pool: Record<string, unknown>
   source_results: Array<Record<string, unknown>>
   errors: string[]
+}
+
+export interface UnifiedSourceItem {
+  id: string
+  source_id: string
+  type: string
+  name: string
+  url: string
+  enabled: boolean
+  human_reason: string
+  sync_policy: string
+  last_synced_at: string
+  last_error: string
+  content_count: number
+  latest_item_at: string
+  metadata: Record<string, unknown>
+}
+
+export interface UnifiedSourcesResponse {
+  sources: UnifiedSourceItem[]
+  counts: {
+    total: number
+    wechat_accounts: number
+    external_sources: number
+    enabled: number
+  }
+  external_config_path: string
+  external_config_is_example: boolean
 }
 
 export interface ExternalSourceUpsertResult {
