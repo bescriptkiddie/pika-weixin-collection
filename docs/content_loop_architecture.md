@@ -1,270 +1,597 @@
-# 人机共创内容生成闭环
+# 多源信息中枢架构设计
 
-这个项目的长期目标不只是“抓公众号”，而是形成一个以人为控制面、AI 为生产力放大器的本地内容生成器。
+## 1. 产品定位
 
-## 一句话定位
+项目不再定位为“微信公众号聚合平台”，而是一个本地优先的 **个人多源信息摄取与内容生产中枢**。
 
-人决定信息源、话题和分发目标，AI 负责采集、整理、聚合和成稿；发布后的反馈再由人和 AI 一起复盘，反向修改来源、选题、评分和生成模板。
+它服务的不是“把公众号文章列出来”这个单点需求，而是：
 
-## 闭环总览
+- 把公众号、B 站、播客、GitHub、RSS、手动收藏等来源统一纳入一个内容池。
+- 用 AI 完成转写、摘要、分类、标签、去重、聚合和初稿生成。
+- 让用户用阅读、收藏、采纳、改写、删除、深挖等动作反向调优系统。
+- 最终产出日报、选题、公众号草稿、知识库材料、Markdown/HTML/飞书等可复用内容。
+
+一句话：
+
+> 人决定信源、主题、判断和输出目标；系统负责把多源信息变成可筛选、可追溯、可生成的内容资产。
+
+## 2. 核心用户体验
+
+目标体验不是“打开后看到公众号列表”，而是“打开后看到今天所有来源里值得处理的内容”。
+
+主路径：
 
 ```text
-人确定信息源 / 话题 / 受众
-  -> AI 采集与整理
-  -> 标准化内容池
-  -> AI 辅助去重 / 标签 / 摘要 / 评分
-  -> 人选择候选素材与角度
-  -> AI 生成草稿
-  -> 人审定、改写、分发
-  -> 人 + AI 复盘反馈
-  -> 修改信息源、话题、评分和生成模板
+添加信源
+  -> 同步/转写
+  -> 进入统一内容池
+  -> AI 摘要、标签、评分
+  -> 用户阅读、筛选、反馈
+  -> 生成日报/选题/草稿/知识库
+  -> 输出后的反馈继续回写
 ```
 
-## 0. 人在闭环中的位置
+首页应该是“统一内容池”，默认按价值和时间混合排序。公众号只是 `source_type=wechat_article` 的一个筛选条件，不再是产品身份。
 
-这个系统不是全自动内容工厂。人的角色不是最后“审核一下”，而是贯穿闭环的控制面。
+## 3. 设计原则
 
-人负责：
+- 信源独立：公众号、B 站、播客、GitHub 不互相伪装，每类来源保留自己的采集方式。
+- 内容统一：所有来源最终都转成 `ContentItem`，前端阅读、筛选、AI 处理、输出都只依赖统一内容池。
+- 人是控制面：信息源、主题、输出目标、采纳与否由用户决定，AI 做放大和候选生成。
+- 可追溯：每个摘要、草稿、报告都能追到原始 URL、source id、抓取时间和原文快照。
+- 本地优先：默认写入 `data/`，真实密钥、运行缓存、音视频缓存不进入 Git。
+- 云端模型可插拔：视频/播客 ASR 走小米 Omni 等云端能力，不默认本地跑模型。
+- 渐进迁移：保留现有公众号爬虫和数据文件，用统一内容池逐步接管前端主体验。
 
-- 选信息源：哪些公众号、GitHub 仓库、RSS、手动链接值得进入系统。
-- 定话题：今天/本周要围绕什么问题生成内容。
-- 选角度：同一批素材可以写成简报、观点文、教程、投研笔记或短内容。
-- 改草稿：调整标题、结构、语气、删减风险内容。
-- 给反馈：采纳、删除、不感兴趣、继续深挖、改写原因。
+## 4. 当前系统与目标系统
 
-AI 负责：
+### 当前已经具备
 
-- 扩大采集规模，降低人工找资料成本。
-- 清洗、去重、摘要、打标签、聚类和初步评分。
-- 根据人的话题和受众生成多版本草稿。
-- 在反馈后提出下一轮来源、选题和模板调整建议。
+- 公众号采集：`name2fakeid.json`、`message_info.json`、`message_detail_text.json`。
+- 外部信源：`data/external_sources.json` 支持 `github_repo`、`bilibili_video`、`podcast_feed`。
+- 统一内容池：`data/content_items.jsonl`。
+- 内容处理：主题标签、AI 分类总结、反馈事件。
+- 现有 API：`/api/content-loop/*` 已覆盖同步、来源新增、打标、AI enrichment、反馈。
+- 前端闭环页：`ContentLoopView.vue` 已能展示外部信源、内容池和操作入口。
 
-真正的闭环成立条件：人的反馈不能只停留在前端状态里，必须写回后端，影响下一次素材排序、选题建议和生成模板。
+### 当前主要断点
 
-## 1. 信息源层
+- 首页仍由 `frontend/src/stores/articles.ts` 读取 `/data/message_info.json`，只展示公众号文章。
+- 筛选逻辑仍以公众号为中心，`source_type`、`source_id`、转写状态、AI 状态不是一等筛选条件。
+- 侧边栏和 README 仍强化“公众号聚合”的产品身份。
+- 信源管理分散：公众号在配置页，B 站/播客在内容闭环页，GitHub 主要依赖 JSON。
+- 视频/播客转写是长任务，但目前缺少统一任务队列、进度、重试、取消和失败诊断。
+- 输出层还弱，尚未形成日报、选题、草稿、知识库发布的稳定工作台。
 
-信息源不应该都伪装成公众号。每类来源保留自己的采集方式，再统一转换成项目内部的标准内容格式。
+## 5. 总体架构
 
-当前已经有：
+```mermaid
+flowchart LR
+  User["用户控制面\n信源 / 主题 / 反馈 / 输出目标"]
 
-- 微信公众号：通过 `name2fakeid.json` 和微信后台接口抓取文章列表、正文、封面。
-- B 站视频：通过 `bilibili_video` 信源读取视频元信息和官方字幕；无字幕时可下载音频并交给云端 ASR provider 转写。
-- 播客 RSS：通过 `podcast_feed` 信源读取节目列表、shownotes 和音频链接；需要全文时可开启云端音频转写。
-- GitHub 仓库：通过 `github_repo` 信源抓 README、docs 和 releases。
-- 本地 Markdown 导出：通过 `scripts/export_markdown.py` 把已采集内容转成可迁移文件。
-- llm_wiki sources 导出：通过 `src/llm_wiki_bridge/export_sources.py` 把公众号文章转成 `raw/sources/wechat/**/*.md`，这是知识库导出路径，不是外部信源主路径。
+  subgraph Sources["信源层"]
+    WeChat["微信公众号"]
+    Bilibili["B 站视频"]
+    Podcast["播客 RSS"]
+    GitHub["GitHub Repo"]
+    RSS["RSS / Atom"]
+    Manual["手动收藏"]
+  end
 
-下一步可扩展：
+  subgraph Registry["信源注册与任务层"]
+    SourceConfig["SourceConfig\nexternal_sources.json / 后续 sources.json"]
+    Jobs["SyncJob / TranscribeJob\n进度、错误、重试"]
+  end
 
-- RSS / Atom：博客、媒体、个人站点。
-- 手动收藏：用户粘贴链接或 Markdown，作为高意图输入。
-- 其他平台：Telegram、X、Reddit、HN 等，按需做独立适配器。
+  subgraph Adapters["采集适配器层"]
+    WeChatAdapter["wechat adapter"]
+    BilibiliAdapter["bilibili adapter"]
+    PodcastAdapter["podcast adapter"]
+    GithubAdapter["github adapter"]
+    GenericAdapter["rss/manual adapters"]
+  end
 
-## 2. 采集适配器层
+  subgraph Pool["统一内容池"]
+    ContentItem["ContentItem\ncontent_items.jsonl"]
+    RawSnapshot["raw snapshots\n可选副产物"]
+  end
 
-每个适配器只负责一件事：从某类源抓内容，并输出标准 `FetchedItem`。落盘文件只能作为 snapshot 或知识库导出，不应成为信源本身。
+  subgraph Intelligence["智能处理层"]
+    Dedupe["去重/合并"]
+    Tagging["标签/分类"]
+    Summary["摘要/转写"]
+    Scoring["评分/排序"]
+  end
 
-建议接口：
+  subgraph Workspace["前端工作台"]
+    Inbox["统一内容池首页"]
+    SourceUI["信源管理"]
+    TaskUI["任务监控"]
+    DraftUI["输出工作台"]
+  end
+
+  subgraph Outputs["输出层"]
+    Brief["日报/周报"]
+    Draft["公众号/长文草稿"]
+    Wiki["llm_wiki / Markdown"]
+    Webhook["飞书/Slack/Webhook"]
+  end
+
+  User --> SourceConfig
+  Sources --> Registry --> Adapters --> ContentItem
+  Adapters --> RawSnapshot
+  ContentItem --> Intelligence --> ContentItem
+  ContentItem --> Workspace
+  Workspace --> Outputs
+  Workspace --> Feedback["feedback_events.jsonl"]
+  Feedback --> Scoring
+  Feedback --> SourceConfig
+```
+
+## 6. 分层设计
+
+### 6.1 信源注册层
+
+信源注册层负责“系统应该关注什么”，不负责具体抓取。
+
+当前短期继续使用：
+
+- `data/name2fakeid.json`：公众号专用注册表。
+- `data/external_sources.json`：GitHub、B 站、播客等外部信源注册表。
+
+目标中期收敛为统一 `SourceConfig` 读模型：
 
 ```text
 SourceConfig
-  id: horizon
-  type: github_repo
-  url: https://github.com/Thysrael/Horizon
-  enabled: true
-  options: {}
+  id
+  type                  # wechat_account | bilibili_video | podcast_feed | github_repo | rss_feed | manual_clip
+  name
+  url
+  enabled
+  sync_policy           # manual | hourly | daily | weekly
+  human_reason
+  options
+  created_at
+  updated_at
+  last_synced_at
+  last_error
+```
 
+迁移策略：
+
+- 不强行废掉 `name2fakeid.json`，先在后端聚合成统一 Source 列表给前端。
+- 外部来源继续走 `external_sources.json`，新增字段时保持向后兼容。
+- 前端信源管理页展示统一 Source，但保存时仍写回各自原文件。
+
+### 6.2 采集适配器层
+
+每个适配器只做三件事：
+
+1. 读取对应 `SourceConfig`。
+2. 抓取或下载原始内容。
+3. 输出标准 `FetchedItem`，不直接决定前端展示。
+
+标准输出：
+
+```text
 FetchedItem
   id
   source_id
   source_type
+  source_name
   title
   url
   author
   published_at
   fetched_at
   digest
-  content_text
   content_markdown
+  media
+  metadata
+  references
+```
+
+适配器边界：
+
+- 微信公众号：保留现有爬虫，继续写 `message_info.json`，再同步为 `wechat_article` ContentItem。
+- B 站：优先官方字幕；没有字幕时下载音频并调用云端 ASR。
+- 播客：优先 RSS shownotes；需要全文时下载 episode 音频并调用云端 ASR。
+- GitHub：通过 GitHub API 抓 README、docs、releases，不把 repo 当静态文件导入。
+- RSS/手动收藏：后续新增时只需实现适配器，不改内容池和前端主逻辑。
+
+### 6.3 任务层
+
+视频、播客、GitHub docs 同步都可能耗时，不能长期依赖一次 HTTP 请求完成。
+
+目标任务模型：
+
+```text
+Job
+  id
+  type                  # sync_source | transcribe_media | ai_enrich | export
+  source_id
+  item_id
+  status                # queued | running | succeeded | failed | cancelled
+  progress
+  message
+  error
+  created_at
+  started_at
+  finished_at
+  retry_count
+```
+
+短期实现可以先用 JSONL：
+
+- `data/job_runs.jsonl`
+- `data/job_events.jsonl`
+
+前端需要一个任务视图：
+
+- 当前正在同步什么。
+- 转写到了哪一步。
+- 失败原因是什么。
+- 是否可以重试。
+
+### 6.4 统一内容池
+
+`ContentItem` 是前端和智能处理层唯一应该依赖的内容读模型。
+
+现有字段继续保留：
+
+```text
+ContentItem
+  id
+  source_type
+  source_id
+  source_name
+  title
+  url
+  author
+  published_at
+  fetched_at
+  summary
+  ai_summary
+  tags
+  auto_tags
+  ai_tags
+  ai_category
+  ai_confidence
+  score
+  status
+  human_decision
+  feedback_notes
+  content_preview
+  content_markdown
+  content_hash
+  dedupe_key
+  references
   metadata
 ```
 
-这样 `Horizon` 不需要进入 `name2fakeid.json`，而是进入 `external_sources.json` 或后续的 `sources.json`。
+关键规则：
 
-## 3. 标准化内容池
+- `message_info.json` 是微信公众号原始缓存，不是未来前端主数据源。
+- `raw/sources/**` 是知识库导出或调试快照，不是信源注册表。
+- `content_items.jsonl` 是当前最小可行内容池；数据量变大后再迁移 SQLite。
 
-公众号文章、GitHub 动态、B 站视频、播客节目和 RSS 文章最终都要进入统一内容池，后面的去重、标签、摘要、生成才不用关心来源。
+### 6.5 智能处理层
 
-当前路径：
+智能处理层负责把“采集到的信息”变成“可决策的素材”。
 
-- 短期：公众号通过 `message_info.json` 同步进 `data/content_items.jsonl`，GitHub / B 站 / 播客等外部信源通过连接器直接同步进同一个内容池。
-- 中期：保留 `data/content_items.jsonl` 作为跨来源统一内容池。
-- 长期：前端从统一内容池读取，再按 `source_type`、`source_id`、标签、主题筛选。
+已有能力：
 
-建议标准字段：
+- 本地主题词表打标签。
+- AI 摘要、AI 标签、AI 分类。
+- 人工反馈写回。
+
+目标能力：
+
+- 去重：跨公众号/B 站/播客/GitHub 识别同一主题或重复引用。
+- 排序：结合发布时间、来源权重、反馈、AI 置信度、用户关注主题。
+- 搜索：支持标题、摘要、全文、转写文本、source、tag、decision。
+- 聚合：围绕一个主题把多条 ContentItem 合成日报或选题包。
+- 反馈学习：根据 adopted/rejected/dig_deeper 调整来源权重和推荐阈值。
+
+### 6.6 前端工作台
+
+目标导航：
 
 ```text
-id
-source_type
-source_id
-source_name
-title
-url
-published_at
-fetched_at
-summary
-tags
-score
-content_hash
-dedupe_key
-status
-content_markdown
-references
-human_decision
-feedback_notes
+内容池
+信源
+任务
+输出
+设置
+日志
 ```
 
-## 4. 知识沉淀层
+页面职责：
 
-这层负责把“信息流”变成“可复用知识”。
+- 内容池：首页，展示所有 `ContentItem`，支持来源类型、来源名称、标签、AI 状态、人工决策、时间范围筛选。
+- 信源：统一管理公众号、B 站、播客、GitHub、RSS、手动收藏，支持新增、停用、同步、删除。
+- 任务：查看同步、转写、AI enrichment、导出的状态和错误。
+- 输出：从筛选结果生成日报、选题、草稿、Markdown、llm_wiki source。
+- 设置：凭证、模型、ASR、缓存策略。
+- 日志：系统操作和错误审计。
 
-已经存在的低摩擦路径是：
+公众号旧文章流可以保留，但应降级为内容池中的一个视图：
 
 ```text
-message_info.json + message_detail_text.json
-  -> src/llm_wiki_bridge/export_sources.py
-  -> data/llm_wiki/wechat_oa/raw/sources/wechat/**/*.md
+内容池?source_type=wechat_article
 ```
 
-后续应扩展为：
+### 6.7 输出层
+
+输出层是这个项目从“收集工具”升级为“生产工具”的关键。
+
+优先级：
+
+1. 本地日报：从今日新增内容生成一份 Markdown。
+2. 主题选题包：围绕用户输入主题聚合来源、摘要和可写角度。
+3. 公众号草稿：生成标题、结构、正文、引用来源和风险提示。
+4. 知识库导出：把内容池导出为 llm_wiki raw sources。
+5. 飞书/Slack/Webhook：把日报推到外部工作流。
+
+输出必须保留来源引用，不默认自动发布。
+
+## 7. API 设计
+
+短期继续复用现有 `/api/content-loop/*`，同时按目标形态整理新接口边界。
+
+### 7.1 信源
 
 ```text
-content_items
-  -> raw/sources/<source_type>/<source_id>/**/*.md
-  -> wiki/sources
-  -> wiki/entities
-  -> wiki/concepts
-  -> wiki/synthesis
+GET    /api/sources
+POST   /api/sources
+PATCH  /api/sources/{source_id}
+DELETE /api/sources/{source_id}
+POST   /api/sources/{source_id}/sync
 ```
 
-知识库层要保留来源链路，任何生成内容都能追溯到原文、发布时间和采集来源。
+兼容映射：
 
-## 5. 内容生成层
+- `GET /api/content-loop/sources`
+- `POST /api/content-loop/sources`
+- `POST /api/content-loop/sync-external`
+- `POST /api/content-loop/sync-wechat`
 
-生成不是单篇文章摘要，也不是 AI 自动决定写什么。它应该从人的“话题意图”开始，再基于知识库输出多种可编辑草稿。
-
-优先做四类：
-
-- 每日简报：今天最值得看的内容，按主题聚合。
-- 主题复盘：围绕某个关键词或赛道，把多篇来源合成一篇分析。
-- 公众号草稿：标题、开头、正文结构、引用来源、结尾观点。
-- 分发短内容：朋友圈、小红书、X/Threads、飞书群摘要。
-
-生成输入应包含：
-
-- 人指定的信息源范围：哪些账号、仓库、RSS、手动收藏参与本次生成。
-- 选题目标：要解释什么问题。
-- 受众：给自己看、给社群看、给公众号读者看。
-- 立场与语气：观察、判断、教程、复盘、批判或推荐。
-- 来源集合：必须列出可追溯 source 文件或 URL。
-- 输出格式：日报、长文、短帖、卡片、邮件。
-
-生成输出不应该直接发布，而应该进入“草稿工作台”：人可以采纳、改写、退回、要求补充来源或换角度。
-
-## 6. 分发层
-
-分发要先支持低风险渠道，再接需要账号权限的平台。
-
-当前已有：
-
-- 本地 Web 阅读界面。
-- Markdown 导出目录。
-- llm_wiki raw sources。
-
-建议顺序：
-
-1. 本地 Markdown / HTML：用于人工校对。
-2. GitHub Pages：发布公开日报或知识库索引。
-3. 飞书 / Slack / Discord Webhook：把日报推到工作流。
-4. 邮件 Newsletter：沉淀订阅关系。
-5. 微信公众号草稿箱：最后接，需要更严格的人工审核。
-
-## 7. 人机反馈调优层
-
-闭环的关键是人和 AI 一起反馈调优，不然系统只是自动抓取和自动写作。
-
-反馈信号包括：
-
-- 阅读：已读、收藏、删除、隐藏源。
-- 质量：哪些来源经常产出高价值内容，哪些来源经常是广告或低质重复。
-- 生成：哪些标题、结构、选题被采用，哪些被人改掉，为什么改。
-- 分发：打开、点击、转发、评论。
-- 人工备注：这篇为什么值得写、为什么不写、下次应该避开什么。
-
-这些信号应该反过来影响：
-
-- 信息源权重。
-- 标签和评分策略。
-- 日报入选阈值。
-- 内容生成模板。
-- 后续选题建议。
-
-最小反馈数据结构应包含：
+### 7.2 内容池
 
 ```text
-item_id
-event
-human_decision
-feedback_note
-suggested_action
-created_at
+GET  /api/content/items
+GET  /api/content/items/{item_id}
+POST /api/content/items/{item_id}/feedback
+POST /api/content/items/tagging
+POST /api/content/items/ai-enrich
 ```
 
-其中 `human_decision` 是闭环核心，例如：`adopted`、`rejected`、`rewrite`、`dig_deeper`、`not_relevant`。AI 可以根据这些信号生成下一轮建议，但最终是否调整来源和话题仍由人决定。
+兼容映射：
 
-## Horizon 的接入位置
+- `GET /api/content-loop/items`
+- `POST /api/content-loop/feedback`
+- `POST /api/content-loop/tagging`
+- `POST /api/content-loop/ai-enrich`
 
-`Thysrael/Horizon` 不建议作为公众号加入，而适合作为两个层面的参考和来源：
-
-1. 作为信息源：新增 `github_repo` 适配器，按配置抓 `Horizon` 的 releases、README、docs 或 repo activity。
-2. 作为架构参考：借鉴它的多源配置、打分、去重、摘要和分发设计，但不要把它的运行时直接塞进当前公众号爬虫。
-
-最小可行接入：
+### 7.3 任务
 
 ```text
+GET  /api/jobs
+GET  /api/jobs/{job_id}
+POST /api/jobs/{job_id}/retry
+POST /api/jobs/{job_id}/cancel
+```
+
+### 7.4 输出
+
+```text
+POST /api/outputs/daily-brief
+POST /api/outputs/topic-pack
+POST /api/outputs/draft
+POST /api/outputs/export/markdown
+POST /api/outputs/export/llm-wiki
+```
+
+## 8. 数据文件规划
+
+当前保留：
+
+```text
+data/name2fakeid.json
+data/message_info.json
+data/message_detail_text.json
 data/external_sources.json
-  -> github_repo:horizon
-  -> bilibili_video:<bvid>
-  -> podcast_feed:<rss-url>
-  <- POST /api/content-loop/sources 或内容闭环页新增入口
-  -> POST /api/content-loop/sync-external 或 scripts/sync_external_sources.py
-  -> data/content_items.jsonl[source_type=github_repo|bilibili_video|podcast_episode]
+data/content_items.jsonl
+data/topic_tags.jsonl
+data/feedback_events.jsonl
+data/operation_logs.jsonl
+data/llm_wiki/**
 ```
 
-如果需要知识库/调试文件，再把 snapshot 作为可选副产物：
+建议新增：
 
 ```text
-external_sources.options.snapshot_raw_sources=true
-  -> data/llm_wiki/wechat_oa/raw/sources/github/horizon/*.md
-  -> data/llm_wiki/wechat_oa/raw/sources/bilibili/<source_id>/*.md
-  -> data/llm_wiki/wechat_oa/raw/sources/podcast/<source_id>/*.md
+data/job_runs.jsonl
+data/job_events.jsonl
+data/output_artifacts.jsonl
+data/source_scores.json
 ```
 
-## 下一步实现顺序
+后续数据量扩大后再引入 SQLite：
 
-1. 维护 `data/external_sources.json`，用 `type` 区分 `github_repo`、`bilibili_video`、`podcast_feed`；B 站和播客可由内容闭环页或 `POST /api/content-loop/sources` 新增。
-2. 用 `POST /api/content-loop/sync-external` 或 `scripts/sync_external_sources.py --source-id <id>` 同步外部信源到 `content_items.jsonl`。
-3. 对视频/播客优先使用官方字幕或 shownotes；没有文本时再启用小米 Omni 等云端 ASR provider。
-4. 把可选 raw snapshot 与主信源同步分离，不要长期依赖 `message_info.json` 或 raw 文件承载所有来源。
-5. 在前端新增来源类型筛选，区分公众号、GitHub、B 站、播客、RSS、手动收藏。
-6. 增加内容生成脚本：从 sources 中选题、聚合、生成日报或公众号草稿。
-7. 把阅读、收藏、删除、草稿采纳、人工备注和发布结果写回反馈数据，形成下一轮评分、选题和模板调整依据。
+```text
+sources
+source_runs
+content_items
+content_references
+feedback_events
+jobs
+output_artifacts
+```
 
-## 设计原则
+迁移原则：
 
-- 源适配器独立：新增来源不应该改动公众号爬虫主逻辑。
-- 数据模型统一：不同来源进入同一个内容池后再做生成。
-- 原文可追溯：所有生成内容保留来源 URL 或 source 文件路径。
-- 人是控制面：信息源、话题、角度、发布和调优都由人确定，AI 做放大和候选生成。
-- 草稿优先：发布前先生成草稿和摘要，不默认全自动发到外部平台。
-- 先本地可控，再外部分发：避免一开始就引入过多账号、权限和平台风险。
+- 先稳定文件协议，再迁移数据库。
+- 前端只通过 API 读写，不直接耦合具体存储。
+- 每个 JSONL 行都是独立事件或独立 item，便于恢复和调试。
+
+## 9. 前端迁移方案
+
+### P0：统一内容池成为首页
+
+- 新建 `useContentItemsStore`，从 `/api/content-loop/items` 读取数据。
+- 新建或改造首页为 `UnifiedContentView`。
+- 筛选条件改为：关键词、来源类型、来源名称、标签、AI 分类、人工决策、日期。
+- 侧边栏品牌从“公众号聚合”改为“信息中枢”或“内容中枢”。
+- 公众号文章流保留为 `source_type=wechat_article` 的筛选视图。
+
+验收标准：
+
+- B 站、播客、GitHub、公众号出现在同一个列表。
+- 点击来源类型可过滤。
+- 没有外部信源时，公众号内容仍能正常显示。
+
+### P1：统一信源管理
+
+- 新建“信源”页面，聚合公众号和外部信源。
+- 支持新增 B 站/播客/GitHub/RSS/手动链接。
+- 每个信源展示：类型、启用状态、最近同步时间、最近错误、内容数量。
+- 支持单个信源立即同步。
+
+验收标准：
+
+- 不需要编辑 JSON 也能新增 B 站/播客。
+- GitHub 源不再被误解为静态导入。
+- 公众号配置仍可扫码和爬取。
+
+### P2：任务与进度
+
+- 同步、转写、AI enrichment 改成可观察任务。
+- 前端展示任务进度、错误、重试。
+- 操作日志与任务事件区分：日志用于审计，任务用于实时状态。
+
+验收标准：
+
+- B 站转写失败时用户能看到失败原因。
+- 重试单个 source 不会重跑全部来源。
+
+### P3：输出工作台
+
+- 支持从当前筛选结果生成日报。
+- 支持按主题生成选题包。
+- 支持生成公众号草稿。
+- 输出记录写入 `output_artifacts.jsonl`，并保留来源引用。
+
+验收标准：
+
+- 输出能追溯到具体 ContentItem。
+- 用户能对草稿给出 adopted/rewrite/rejected 反馈。
+
+## 10. 后端迁移方案
+
+### P0：读模型收敛
+
+- 保持公众号爬虫不动。
+- 确保 `sync_wechat_content_items()` 稳定把公众号缓存转为 `ContentItem`。
+- 首页数据只从内容池 API 读取。
+
+### P1：Source 服务
+
+- 抽出 `src/content_loop/sources.py` 聚合 `name2fakeid.json` 和 `external_sources.json`。
+- 给前端提供统一 `Source` 响应。
+- 新增 source 更新、停用、删除的后端函数。
+
+### P2：Job 服务
+
+- 抽出 `src/content_loop/jobs.py`。
+- 长任务写 `job_runs.jsonl` 和 `job_events.jsonl`。
+- API 返回 `job_id`，前端轮询 job 状态。
+
+### P3：Output 服务
+
+- 抽出 `src/content_loop/outputs.py`。
+- 从 ContentItem 查询结果生成日报、主题包、草稿。
+- 输出路径统一写入 `data/outputs/`，元数据写入 `output_artifacts.jsonl`。
+
+## 11. AI 与 ASR 边界
+
+### LLM
+
+用途：
+
+- 内容摘要。
+- 标签/分类。
+- 主题聚合。
+- 日报和草稿生成。
+- 根据反馈给出来源和模板调整建议。
+
+配置：
+
+```text
+CONTENT_LOOP_LLM_BASE_URL
+CONTENT_LOOP_LLM_API_KEY
+CONTENT_LOOP_LLM_MODEL
+CONTENT_LOOP_LLM_TIMEOUT
+```
+
+### ASR
+
+用途：
+
+- B 站无字幕视频转写。
+- 播客音频转写。
+
+配置：
+
+```text
+WECHATOA_ASR_PROVIDER=xiaomi_omni
+WECHATOA_ASR_MODEL=mimo-v2-omni
+CONTENT_LOOP_LLM_BASE_URL=https://token-plan-sgp.xiaomimimo.com/v1
+CONTENT_LOOP_LLM_API_KEY=...
+```
+
+边界：
+
+- 不默认本地跑 ASR 模型。
+- 不把音视频缓存提交到 Git。
+- 长音频必须进入任务层，避免阻塞普通 HTTP 请求。
+
+## 12. 风险与约束
+
+- 微信凭证会过期，公众号采集必须保留凭证检测和扫码续期。
+- GitHub API 可能触发 rate limit，需要支持 token 和错误展示。
+- B 站/播客转写成本和耗时较高，需要 source 级别开关和任务重试。
+- JSONL 简单可靠，但全文搜索和多条件查询会逐渐变慢，后续需要 SQLite/FTS。
+- AI 输出不能直接发布，必须先进入草稿和人工审核。
+- 真实 API key、cookie、音视频缓存、生成结果大文件都不能进入 Git。
+
+## 13. 非目标
+
+- 不把所有信息源都塞进 `name2fakeid.json`。
+- 不用 iframe 假装实现前端。
+- 不把 llm_wiki raw snapshot 当作主信源注册表。
+- 不默认全自动发布到外部平台。
+- 不为了多源而重写现有公众号爬虫。
+
+## 14. 最小落地路线
+
+第一步只做一件事：让统一内容池成为用户看到的第一屏。
+
+```text
+frontend/src/stores/articles.ts
+  当前：读取 message_info.json
+  目标：保留为公众号兼容 store
+
+新增 useContentItemsStore
+  读取 /api/content-loop/items
+
+FeedView / 新 UnifiedContentView
+  展示 ContentItem
+  支持 source_type/source_id/tag/decision 筛选
+
+AppSidebar
+  品牌改为内容中枢
+  公众号列表改为信源列表或来源筛选
+```
+
+完成这一步后，B 站、播客、GitHub 才会从“闭环页里的附属能力”变成产品主体验的一部分。

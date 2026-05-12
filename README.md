@@ -1,6 +1,6 @@
 # pika-weixin-collection
 
-微信公众号聚合平台——爬取多个公众号的文章，在本地 Web 界面中进行筛选、过滤和阅读，可聚合多个公众号的优质文章统一阅读，AI 辅助分析。
+个人多源信息摄取与内容生产中枢——把公众号、B 站、播客、GitHub 等来源统一进入本地内容池，再用 AI 做转写、摘要、分类、筛选、反馈和输出。
 
 ![blog_preview.png](figures/blog_preview.png)
 
@@ -100,7 +100,7 @@ cd frontend && npm run dev
 
 ### 人机共创内容闭环
 
-内容闭环页面对应 `docs/content_loop_architecture.md` 和 `docs/content_loop_opendesign.html` 的 MVP 落地：
+内容闭环页面对应 `docs/content_loop_architecture.md` 和 `docs/content_loop_opendesign.html` 的 MVP 落地；当前目标是把它从二级功能升级为统一内容池主入口：
 
 - 公众号缓存 → `POST /api/content-loop/sync-wechat` → `data/content_items.jsonl`
 - 外部信源配置 → `data/external_sources.json` / `data/external_sources.example.json`
@@ -190,7 +190,7 @@ WECHATOA_ASR_MODEL=mimo-v2-omni
 
 ## 规划文档
 
-- [人机共创内容生成闭环](docs/content_loop_architecture.md)：把项目从公众号采集扩展为“人定信息源/话题 -> AI 整理成稿 -> 人审分发 -> 人机反馈调优”的内容生成器。
+- [多源信息中枢架构设计](docs/content_loop_architecture.md)：把项目从公众号阅读器升级为“多源采集 -> 统一内容池 -> AI 处理 -> 人工反馈 -> 输出工作台”的内容中枢。
 - [闭环 HTML 设计稿](docs/content_loop_opendesign.html)：用于确认人机共创逻辑、Horizon 接入位置和 MVP 实现顺序。
 - [Tauri + llm_wiki 分支说明](docs/tauri_llm_wiki_branch.md)：桌面壳与 llm_wiki sources 导出方向。
 
