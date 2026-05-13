@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from ..utils.helpers import url2text
 from ..utils.data_manager import data_manager
+from ..utils.semantic_similarity import cosine_similarity, vectorize_text
 
 
 def calc_duplicate_rate(text_list1, text_list2) -> float:
@@ -56,6 +57,23 @@ def calc_duplicate_rate_max(text_list1, text_list2) -> float:
     return dup_rate
 
 
+def build_semantic_text(article, detail_text) -> str:
+    parts = [
+        article.get('title', ''),
+        article.get('summary', ''),
+        article.get('digest', ''),
+        ' '.join(article.get('tags', []) or []),
+    ]
+    if isinstance(detail_text, list):
+        parts.append(' '.join(detail_text[:80]))
+    elif isinstance(detail_text, str):
+        parts.append(detail_text)
+    return '\n'.join(part for part in parts if part)
+
+
+SEMANTIC_DUP_THRESHOLD = 0.38
+
+
 class minHashLSH:
     def __init__(self):
         from datasketch import MinHash, MinHashLSH
@@ -80,6 +98,7 @@ class minHashLSH:
         from datasketch import MinHash
         # 获取 {id: url} 的映射
         id2url = {m['id']: m['link'] for v in data_manager.message_info.values() for m in v['blogs']}
+        id2article = {m['id']: m for v in data_manager.message_info.values() for m in v['blogs']}
 
         # 获取所有文章，并过滤掉已删除和创建时间小于2025-06-01的
         message_total = [m for v in data_manager.message_info.values() for m in v['blogs']
@@ -99,7 +118,7 @@ class minHashLSH:
                 if self.is_delete(text_list, m['id']):
                     continue
                 # 对文章进行分词
-                text_list = self.split_text(' '.join(text_list))
+                text_list = self.split_text(' '.join(text_list if isinstance(text_list, list) else [str(text_list)]))
                 min1 = MinHash(num_perm=128)
                 for d in text_list:
                     min1.update(d.encode('utf8'))
@@ -116,16 +135,32 @@ class minHashLSH:
                     continue
                 # 如果有相似的，先判断jaccard相似度，大于0.9直接通过，若在0.8-0.9之间则使用规则再次判断
                 sim_m_res = []
+                current_text_list = data_manager.message_detail_text.get(m['id'])
+                current_semantic = vectorize_text(build_semantic_text(m, current_text_list))
                 for s in sim_m:
                     if self.minhash_dict[m['id']].jaccard(self.minhash_dict[s]) >= 0.9:  # .jaccard会和MinHashLSH计算的有点差异
                         sim_m_res.append(s)
-                    else:
-                        dup_rate = calc_duplicate_rate_max(text_list, url2text(id2url[s]))
-                        # 规则大于0.7则认为是重复的
-                        if dup_rate > 0.7:
-                            sim_m_res.append(s)
+                        continue
+
+                    other_text = data_manager.message_detail_text.get(s)
+                    if other_text is None:
+                        other_text = url2text(id2url[s])
+                        data_manager.message_detail_text[s] = other_text
+                    dup_rate = calc_duplicate_rate_max(
+                        current_text_list if isinstance(current_text_list, list) else [str(current_text_list)],
+                        other_text if isinstance(other_text, list) else [str(other_text)],
+                    )
+                    # 规则大于0.7则认为是重复的
+                    if dup_rate > 0.7:
+                        sim_m_res.append(s)
+                        continue
+
+                    other_article = id2article.get(s, {})
+                    other_semantic = vectorize_text(build_semantic_text(other_article, other_text))
+                    if cosine_similarity(current_semantic, other_semantic) >= SEMANTIC_DUP_THRESHOLD:
+                        sim_m_res.append(s)
                 if sim_m_res:
-                    data_manager.issues_message['dup_minhash'][m['id']] = sim_m
+                    data_manager.issues_message['dup_minhash'][m['id']] = sim_m_res
             else:
                 self.lsh.insert(m['id'], self.minhash_dict[m['id']])
         data_manager.write('message_detail_text')

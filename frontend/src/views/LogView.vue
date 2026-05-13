@@ -45,6 +45,14 @@ const LOG_META: Record<string, { label: string; color: string; bg: string; icon:
   account_remove: { label: '移除公众号', color: 'text-orange-500', bg: 'bg-orange-500/10', icon: UserMinus },
   cache_clear:    { label: '清理缓存',  color: 'text-purple-500', bg: 'bg-purple-500/10', icon: Eraser },
   article_delete: { label: '删除文章', color: 'text-rose-500', bg: 'bg-rose-500/10', icon: Trash2 },
+  cover_refill:   { label: '封面补全', color: 'text-cyan-500', bg: 'bg-cyan-500/10', icon: RefreshCw },
+  wiki_export:    { label: '导出 Wiki', color: 'text-sky-500', bg: 'bg-sky-500/10', icon: ScrollText },
+  content_sync:   { label: '同步内容池', color: 'text-teal-500', bg: 'bg-teal-500/10', icon: RefreshCw },
+  external_sync:  { label: '同步外部源', color: 'text-violet-500', bg: 'bg-violet-500/10', icon: RefreshCw },
+  external_source_add: { label: '新增信源', color: 'text-fuchsia-500', bg: 'bg-fuchsia-500/10', icon: UserPlus },
+  feedback_event: { label: '人工反馈', color: 'text-amber-500', bg: 'bg-amber-500/10', icon: CircleCheck },
+  tagging_run:    { label: '批量打标签', color: 'text-lime-500', bg: 'bg-lime-500/10', icon: CircleCheck },
+  ai_enrich:      { label: 'AI 富化', color: 'text-pink-500', bg: 'bg-pink-500/10', icon: CircleCheck },
 }
 
 /** 根据日志类型获取元数据，未知类型返回默认样式 */

@@ -12,7 +12,7 @@
 //   7. 扫码登录（无头 Chrome 截图 + 前端展示弹窗）
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
 import {
   Settings,
   Eye,
@@ -42,7 +42,7 @@ import {
   ShieldOff,
   QrCode,
 } from 'lucide-vue-next'
-import type { CrawlStatus, CachePreview, AuthStatus } from '@/types'
+import type { CrawlStatus, CachePreview, AuthStatus, CoverRefillPreview, CoverRefillResult, CrawlScheduleStatus } from '@/types'
 import { useArticlesStore } from '@/stores/articles'
 import { useConfigStore } from '@/stores/config'
 
@@ -114,11 +114,16 @@ const searchResults = ref<SearchCandidate[]>([])    // 搜索结果候选列表
 const selectedCandidate = ref<SearchCandidate | null>(null)  // 正在确认添加的候选
 const confirmState = ref<'idle' | 'loading' | 'success' | 'error'>('idle')
 const confirmError = ref('')
+const addInputRef = ref<HTMLInputElement | null>(null)
 
-function openAddDialog() {
-  showAddDialog.value = true
+async function focusAddInput() {
+  await nextTick()
+  addInputRef.value?.focus()
+  addInputRef.value?.select()
+}
+
+function resetAddFlow() {
   addStep.value = 'input'
-  searchQuery.value = ''
   searchState.value = 'idle'
   searchError.value = ''
   searchResults.value = []
@@ -127,15 +132,20 @@ function openAddDialog() {
   confirmError.value = ''
 }
 
+function openAddDialog() {
+  showAddDialog.value = true
+  searchQuery.value = ''
+  resetAddFlow()
+  void focusAddInput()
+}
+
 function closeAddDialog() {
   showAddDialog.value = false
 }
 
 function backToSearch() {
-  addStep.value = 'input'
-  selectedCandidate.value = null
-  confirmState.value = 'idle'
-  confirmError.value = ''
+  resetAddFlow()
+  void focusAddInput()
 }
 
 async function doSearch() {
@@ -182,9 +192,10 @@ async function confirmAdd(candidate: SearchCandidate) {
       selectedCandidate.value = null
       return
     }
-    confirmState.value = 'success'
     await articlesStore.reloadAccounts()
-    setTimeout(() => closeAddDialog(), 1000)
+    searchQuery.value = ''
+    resetAddFlow()
+    void focusAddInput()
   } catch {
     confirmState.value = 'error'
     confirmError.value = '网络错误，请重试'
@@ -426,7 +437,65 @@ function closeLoginModal() {
   stopLoginPoll()
 }
 
-// ---------- 缓存清理 ----------
+// ---------- 定时自动爬取 ----------
+
+const showScheduleModal = ref(false)
+const scheduleState = ref<CrawlScheduleStatus | null>(null)
+const scheduleEnabled = ref(false)
+const scheduleTime = ref('08:30')
+const scheduleLoading = ref(false)
+const scheduleSaving = ref(false)
+
+async function loadScheduleState() {
+  scheduleLoading.value = true
+  try {
+    const res = await fetch('/api/crawl/schedule')
+    if (res.ok) {
+      const data: CrawlScheduleStatus = await res.json()
+      scheduleState.value = data
+      scheduleEnabled.value = data.enabled
+      scheduleTime.value = data.time
+    }
+  } catch { /* 静默 */ } finally {
+    scheduleLoading.value = false
+  }
+}
+
+async function openScheduleModal() {
+  showScheduleModal.value = true
+  await loadScheduleState()
+}
+
+function closeScheduleModal() {
+  showScheduleModal.value = false
+}
+
+async function saveSchedule() {
+  scheduleSaving.value = true
+  try {
+    const res = await fetch('/api/crawl/schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: scheduleEnabled.value, time: scheduleTime.value }),
+    })
+    const data = (await res.json().catch(() => ({}))) as Partial<CrawlScheduleStatus> & { detail?: string }
+    if (!res.ok) {
+      alert(data.detail || '保存失败')
+      return
+    }
+    scheduleState.value = data as CrawlScheduleStatus
+    scheduleEnabled.value = scheduleState.value.enabled
+    scheduleTime.value = scheduleState.value.time
+    showScheduleModal.value = false
+  } catch {
+    alert('无法连接到后端服务')
+  } finally {
+    scheduleSaving.value = false
+  }
+}
+
+void loadScheduleState()
+
 
 const showCacheModal = ref(false)
 const cacheKeepDays = ref(90)
@@ -464,7 +533,6 @@ async function fetchCachePreview() {
     cachePreviewLoading.value = false
   }
 }
-
 async function doCacheClear() {
   if (!cachePreview.value || cachePreview.value.removable_articles === 0) return
   cacheClearLoading.value = true
@@ -477,7 +545,6 @@ async function doCacheClear() {
     if (res.ok) {
       cacheClearDone.value = true
       await articlesStore.loadData()
-      // 刷新预览数据
       await fetchCachePreview()
     } else {
       const data = await res.json()
@@ -489,11 +556,59 @@ async function doCacheClear() {
     cacheClearLoading.value = false
   }
 }
-</script>
 
+// ---------- 封面补全 ----------
+
+const showCoverRefillModal = ref(false)
+const coverRefillPreview = ref<CoverRefillPreview | null>(null)
+const coverRefillPreviewLoading = ref(false)
+const coverRefillLoading = ref(false)
+const coverRefillResult = ref<CoverRefillResult | null>(null)
+
+async function openCoverRefillModal() {
+  showCoverRefillModal.value = true
+  coverRefillResult.value = null
+  await fetchCoverRefillPreview()
+}
+
+function closeCoverRefillModal() {
+  showCoverRefillModal.value = false
+  coverRefillPreview.value = null
+  coverRefillResult.value = null
+}
+
+async function fetchCoverRefillPreview() {
+  coverRefillPreviewLoading.value = true
+  coverRefillPreview.value = null
+  try {
+    const res = await fetch('/api/covers/refill/preview')
+    if (res.ok) coverRefillPreview.value = await res.json()
+  } catch { /* 静默 */ } finally {
+    coverRefillPreviewLoading.value = false
+  }
+}
+
+async function doCoverRefill() {
+  if (!coverRefillPreview.value || coverRefillPreview.value.missing_covers === 0) return
+  coverRefillLoading.value = true
+  try {
+    const res = await fetch('/api/covers/refill', { method: 'POST' })
+    const data = (await res.json().catch(() => ({}))) as Partial<CoverRefillResult> & { detail?: string }
+    if (!res.ok) {
+      alert(data.detail || '补全失败')
+      return
+    }
+    coverRefillResult.value = data as CoverRefillResult
+    await fetchCoverRefillPreview()
+  } catch {
+    alert('无法连接到后端服务')
+  } finally {
+    coverRefillLoading.value = false
+  }
+}
+</script>
 <template>
   <div class="app-view-shell flex h-full flex-col overflow-hidden">
-    <!-- Header -->
     <div class="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-background)]/80 backdrop-blur-sm px-6 py-5">
       <div class="flex items-center gap-3 mb-4">
         <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--color-primary)]/10">
@@ -645,6 +760,20 @@ async function doCacheClear() {
           <span>{{ authLevel === 'ok' ? '凭证有效' : authLevel === 'warn' ? '可能过期' : '未配置' }}</span>
         </div>
 
+        <button
+          @click="openScheduleModal"
+          class="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+        >
+          <Clock class="h-3.5 w-3.5" />
+          定时爬取
+        </button>
+        <button
+          @click="openCoverRefillModal"
+          class="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+        >
+          <RefreshCw class="h-3.5 w-3.5" />
+          封面补全
+        </button>
         <!-- Cache clear button -->
         <button
           @click="openCacheModal"
@@ -694,9 +823,18 @@ async function doCacheClear() {
             <div class="flex items-center justify-between gap-2 mb-1.5">
               <p class="text-sm font-medium text-[var(--color-foreground)]">
                 <template v-if="crawlStatus.running">
-                  正在爬取
-                  <span v-if="crawlStatus.current" class="text-[var(--color-primary)]">「{{ crawlStatus.current }}」</span>
-                  <span class="text-[var(--color-muted-foreground)] font-normal ml-1">（{{ crawlStatus.done }}/{{ crawlStatus.total }}）</span>
+                  <template v-if="crawlStatus.current">
+                    正在爬取
+                    <span class="text-[var(--color-primary)]">「{{ crawlStatus.current }}」</span>
+                    <span class="text-[var(--color-muted-foreground)] font-normal ml-1">（{{ crawlStatus.done }}/{{ crawlStatus.total }}）</span>
+                  </template>
+                  <template v-else-if="crawlStatus.total > 0">
+                    正在准备爬取账号列表
+                    <span class="text-[var(--color-muted-foreground)] font-normal ml-1">（共 {{ crawlStatus.total }} 个）</span>
+                  </template>
+                  <template v-else>
+                    正在启动爬取任务…
+                  </template>
                 </template>
                 <template v-else-if="crawlStatus.finished_at">
                   爬取完成 — 新增 <span class="text-emerald-500">{{ crawlStatus.new_articles }}</span> 篇文章
@@ -863,6 +1001,7 @@ async function doCacheClear() {
               <div class="space-y-3">
                 <div class="flex gap-2">
                   <input
+                    ref="addInputRef"
                     v-model="searchQuery"
                     type="text"
                     placeholder="输入公众号名称关键词..."
@@ -987,6 +1126,167 @@ async function doCacheClear() {
               </div>
             </div>
 
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== 定时自动爬取 Modal ===== -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="showScheduleModal"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          @click.self="closeScheduleModal"
+        >
+          <div class="w-full max-w-md rounded-2xl bg-[var(--color-card)] border border-[var(--color-border)] shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
+              <div class="flex items-center gap-2.5">
+                <Clock class="h-5 w-5 text-[var(--color-muted-foreground)]" />
+                <h2 class="text-base font-semibold text-[var(--color-foreground)]">定时自动爬取</h2>
+              </div>
+              <button @click="closeScheduleModal" class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] transition-colors">
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+
+            <div class="px-6 py-5 space-y-5">
+              <div v-if="scheduleLoading" class="flex items-center justify-center gap-2 py-6">
+                <Loader2 class="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
+                <span class="text-sm text-[var(--color-muted-foreground)]">加载中...</span>
+              </div>
+              <template v-else>
+                <label class="flex items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)]/30 px-4 py-3">
+                  <div>
+                    <p class="text-sm font-medium text-[var(--color-foreground)]">启用定时爬取</p>
+                    <p class="text-xs text-[var(--color-muted-foreground)] mt-0.5">每天按设定时间自动触发一次爬取。</p>
+                  </div>
+                  <button
+                    type="button"
+                    @click="scheduleEnabled = !scheduleEnabled"
+                    class="inline-flex h-6 w-11 items-center rounded-full px-0.5 transition-colors"
+                    :class="scheduleEnabled ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-muted)]'"
+                  >
+                    <span class="h-5 w-5 rounded-full bg-white shadow transition-transform" :class="scheduleEnabled ? 'translate-x-5' : 'translate-x-0'" />
+                  </button>
+                </label>
+
+                <div>
+                  <label class="mb-2 block text-sm font-medium text-[var(--color-foreground)]">执行时间</label>
+                  <input
+                    v-model="scheduleTime"
+                    type="time"
+                    class="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm text-[var(--color-foreground)] outline-none focus:border-[var(--color-ring)] focus:ring-1 focus:ring-[var(--color-ring)]"
+                  />
+                </div>
+
+                <div v-if="scheduleState" class="rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)]/30 px-4 py-3 text-sm">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="text-[var(--color-muted-foreground)]">最近一次执行</span>
+                    <span class="font-medium text-[var(--color-foreground)]">{{ scheduleState.last_run_at || '—' }}</span>
+                  </div>
+                  <div class="mt-2 flex items-center justify-between gap-2">
+                    <span class="text-[var(--color-muted-foreground)]">最近状态</span>
+                    <span class="font-medium text-[var(--color-foreground)]">{{ scheduleState.last_status || 'idle' }}</span>
+                  </div>
+                  <p v-if="scheduleState.last_message" class="mt-2 text-xs text-[var(--color-muted-foreground)]">{{ scheduleState.last_message }}</p>
+                </div>
+              </template>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
+              <button
+                @click="closeScheduleModal"
+                class="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-foreground)] hover:bg-[var(--color-accent)] transition-colors"
+              >
+                取消
+              </button>
+              <button
+                @click="saveSchedule"
+                :disabled="scheduleSaving || scheduleLoading"
+                class="flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Loader2 v-if="scheduleSaving" class="h-3.5 w-3.5 animate-spin" />
+                <Clock v-else class="h-3.5 w-3.5" />
+                {{ scheduleSaving ? '保存中...' : '保存设置' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- ===== 封面补全 Modal ===== -->
+    <Teleport to="body">
+      <Transition name="fade">
+        <div
+          v-if="showCoverRefillModal"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          @click.self="closeCoverRefillModal"
+        >
+          <div class="w-full max-w-md rounded-2xl bg-[var(--color-card)] border border-[var(--color-border)] shadow-2xl overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
+              <div class="flex items-center gap-2.5">
+                <RefreshCw class="h-5 w-5 text-[var(--color-muted-foreground)]" />
+                <h2 class="text-base font-semibold text-[var(--color-foreground)]">补全历史封面</h2>
+              </div>
+              <button @click="closeCoverRefillModal" class="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] transition-colors">
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+
+            <div class="px-6 py-5 space-y-5">
+              <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-muted)]/40 p-4">
+                <div v-if="coverRefillPreviewLoading" class="flex items-center justify-center gap-2 py-2">
+                  <Loader2 class="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
+                  <span class="text-sm text-[var(--color-muted-foreground)]">计算中...</span>
+                </div>
+                <div v-else-if="coverRefillPreview" class="space-y-2.5">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="text-[var(--color-muted-foreground)]">当前文章总数</span>
+                    <span class="font-semibold text-[var(--color-foreground)]">{{ coverRefillPreview.total_articles }} 篇</span>
+                  </div>
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="text-[var(--color-muted-foreground)]">缺失本地封面</span>
+                    <span class="font-semibold" :class="coverRefillPreview.missing_covers > 0 ? 'text-orange-500' : 'text-emerald-500'">
+                      {{ coverRefillPreview.missing_covers }} 张
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="coverRefillResult" class="flex items-start gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
+                <CircleCheck class="h-4 w-4 shrink-0 mt-0.5" />
+                <div>
+                  <p>补全完成</p>
+                  <p class="text-xs opacity-80 mt-1">成功 {{ coverRefillResult.downloaded }} 张，失败 {{ coverRefillResult.failed }} 张</p>
+                </div>
+              </div>
+
+              <div v-if="coverRefillPreview && coverRefillPreview.missing_covers > 0 && !coverRefillResult" class="flex items-start gap-2 rounded-xl bg-cyan-50 dark:bg-cyan-900/20 px-4 py-3 text-xs text-cyan-700 dark:text-cyan-300">
+                <RefreshCw class="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>会为历史文章补下载缺失的本地封面，不改动文章正文与筛选状态。</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
+              <button
+                @click="closeCoverRefillModal"
+                class="rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-foreground)] hover:bg-[var(--color-accent)] transition-colors"
+              >
+                {{ coverRefillResult ? '关闭' : '取消' }}
+              </button>
+              <button
+                v-if="!coverRefillResult"
+                @click="doCoverRefill"
+                :disabled="coverRefillLoading || !coverRefillPreview || coverRefillPreview.missing_covers === 0"
+                class="flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Loader2 v-if="coverRefillLoading" class="h-3.5 w-3.5 animate-spin" />
+                <RefreshCw v-else class="h-3.5 w-3.5" />
+                {{ coverRefillLoading ? '补全中...' : `补全 ${coverRefillPreview?.missing_covers ?? 0} 张` }}
+              </button>
+            </div>
           </div>
         </div>
       </Transition>

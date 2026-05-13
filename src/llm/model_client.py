@@ -13,6 +13,8 @@ import requests
 # 默认与业务侧约定一致；可通过环境变量覆盖模型名（自部署网关可能要求固定 id）
 _DEFAULT_MODEL = "Qwen3.5-27B"
 _DEFAULT_TIMEOUT = 120.0
+_DEFAULT_CONTENT_LOOP_MODEL = "moonshot-v1-8k"
+_DEFAULT_CONTENT_LOOP_TIMEOUT = 120.0
 
 
 def qwen_endpoint_configured() -> bool:
@@ -68,6 +70,88 @@ def chat_qwen35_27b(messages: list[dict[str, Any]]) -> str:
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]
+
+
+
+def _content_loop_base_url() -> str:
+    return (
+        os.environ.get("CONTENT_LOOP_LLM_BASE_URL", "").strip()
+        or os.environ.get("CONTENT_LOOP_LLM_ENDPOINT", "").strip()
+    )
+
+
+def content_loop_llm_configured() -> bool:
+    return bool(_content_loop_base_url() and os.environ.get("CONTENT_LOOP_LLM_API_KEY", "").strip())
+
+
+def _content_loop_chat_url() -> str:
+    base = _content_loop_base_url().rstrip("/")
+    if base.endswith("/chat/completions"):
+        return base
+    return f"{base}/chat/completions"
+
+
+def _content_loop_model_name() -> str:
+    return os.environ.get("CONTENT_LOOP_LLM_MODEL", _DEFAULT_CONTENT_LOOP_MODEL).strip() or _DEFAULT_CONTENT_LOOP_MODEL
+
+
+def _content_loop_timeout() -> float:
+    raw = os.environ.get("CONTENT_LOOP_LLM_TIMEOUT", "").strip()
+    if not raw:
+        return _DEFAULT_CONTENT_LOOP_TIMEOUT
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return _DEFAULT_CONTENT_LOOP_TIMEOUT
+
+
+def chat_content_loop_llm(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int | None = None,
+    temperature: float = 0.1,
+    response_format: dict[str, Any] | None = None,
+) -> str:
+    """
+    调用内容闭环专用 OpenAI-compatible Chat Completions 接口。
+
+    通过 CONTENT_LOOP_LLM_BASE_URL / CONTENT_LOOP_LLM_API_KEY / CONTENT_LOOP_LLM_MODEL 配置。
+    """
+    if not content_loop_llm_configured():
+        raise RuntimeError("CONTENT_LOOP_LLM_BASE_URL 或 CONTENT_LOOP_LLM_API_KEY 未设置")
+
+    payload = {
+        "model": _content_loop_model_name(),
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if response_format is not None:
+        payload["response_format"] = response_format
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {os.environ['CONTENT_LOOP_LLM_API_KEY'].strip()}",
+    }
+    resp = requests.post(
+        _content_loop_chat_url(),
+        json=payload,
+        headers=headers,
+        timeout=_content_loop_timeout(),
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
+def content_loop_llm_status() -> dict[str, Any]:
+    return {
+        "configured": content_loop_llm_configured(),
+        "base_url": _content_loop_base_url(),
+        "model": _content_loop_model_name(),
+        "has_api_key": bool(os.environ.get("CONTENT_LOOP_LLM_API_KEY", "").strip()),
+        "timeout": _content_loop_timeout(),
+    }
 
 
 # ---------------------------------------------------------------------------

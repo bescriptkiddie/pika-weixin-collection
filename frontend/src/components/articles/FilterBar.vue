@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Search, X, SlidersHorizontal, LayoutGrid, List, Bookmark, BookmarkCheck, Circle } from 'lucide-vue-next'
+import { Search, X, SlidersHorizontal, LayoutGrid, List, Bookmark, BookmarkCheck, Circle, Download } from 'lucide-vue-next'
 import { useArticlesStore } from '@/stores/articles'
 import { useReadingStore } from '@/stores/reading'
-import type { FilterState, SortOrder, GroupBy, ReadFilter } from '@/types'
+import type { FilterState, SortOrder, GroupBy, ReadFilter, ExportFormat } from '@/types'
 import Dropdown from '@/components/ui/Dropdown.vue'
 import DateRangePicker from '@/components/ui/DateRangePicker.vue'
 
@@ -21,6 +21,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:filters': [value: FilterState]
   'update:viewMode': [value: 'grid' | 'list']
+  export: [value: ExportFormat]
   reset: []
 }>()
 
@@ -63,10 +64,29 @@ const groupOptions = [
   { value: 'account' as GroupBy, label: '按公众号' },
 ]
 
+const exportOptions = [
+  { value: 'markdown' as ExportFormat, label: '导出 Markdown' },
+  { value: 'csv' as ExportFormat, label: '导出 CSV' },
+  { value: 'json' as ExportFormat, label: '导出 JSON' },
+]
+
+const exportMenuOpen = ref(false)
+
+function handleExport(format: string) {
+  emit('export', format as ExportFormat)
+  exportMenuOpen.value = false
+}
+
 const activeFilters = computed(() => {
   const list: { label: string; remove: () => void }[] = []
   if (props.filters.keyword) {
     list.push({ label: `"${props.filters.keyword}"`, remove: () => update('keyword', '') })
+  }
+  if (props.filters.excludeAds) {
+    list.push({ label: '已过滤广告', remove: () => update('excludeAds', false) })
+  }
+  if (props.filters.semanticSearch && props.filters.keyword.trim()) {
+    list.push({ label: '语义搜索', remove: () => update('semanticSearch', false) })
   }
   props.filters.accounts.forEach((acc) => {
     list.push({ label: acc, remove: () => toggleAccount(acc) })
@@ -184,6 +204,46 @@ const activeFilters = computed(() => {
         <span v-if="activeCount > 0" class="text-xs font-semibold tabular-nums">{{ activeCount }}</span>
       </button>
 
+      <!-- Export -->
+      <div class="relative hidden sm:block">
+        <button
+          type="button"
+          @click="exportMenuOpen = !exportMenuOpen"
+          class="shrink-0 text-sm transition-colors"
+          :class="glass
+            ? ['feed-glass-tool', exportMenuOpen ? 'is-active' : '']
+            : 'flex h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]'"
+          title="导出当前筛选结果"
+        >
+          <Download class="h-4 w-4" />
+          <span v-if="!glass">导出</span>
+        </button>
+        <Transition
+          enter-active-class="transition duration-100 ease-out"
+          enter-from-class="opacity-0 scale-95 translate-y-[-4px]"
+          enter-to-class="opacity-100 scale-100 translate-y-0"
+          leave-active-class="transition duration-75 ease-in"
+          leave-from-class="opacity-100 scale-100 translate-y-0"
+          leave-to-class="opacity-0 scale-95 translate-y-[-4px]"
+        >
+          <div
+            v-if="exportMenuOpen"
+            class="absolute right-0 top-full z-50 mt-1.5 min-w-[10rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] py-1 shadow-lg shadow-black/10"
+          >
+            <button
+              v-for="opt in exportOptions"
+              :key="opt.value"
+              type="button"
+              @click="handleExport(opt.value)"
+              class="flex w-full items-center gap-2 px-3 py-2 text-sm text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+            >
+              <Download class="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />
+              {{ opt.label }}
+            </button>
+          </div>
+        </Transition>
+      </div>
+
       <!-- View mode toggle -->
       <div
         class="hidden sm:flex shrink-0"
@@ -236,6 +296,47 @@ const activeFilters = computed(() => {
         class="p-4 space-y-4 rounded-xl"
         :class="glass ? 'feed-glass-advanced' : 'border border-[var(--color-border)] bg-[var(--color-card)]'"
       >
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)] mb-2">内容策略</p>
+          <div class="space-y-3">
+            <label class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-2.5 text-sm text-[var(--color-foreground)]">
+              <div>
+                <p class="font-medium">默认过滤广告内容</p>
+                <p class="text-xs text-[var(--color-muted-foreground)] mt-0.5">隐藏带有“广告”标签的文章，可手动关闭查看全部内容。</p>
+              </div>
+              <button
+                type="button"
+                @click="update('excludeAds', !filters.excludeAds)"
+                class="inline-flex h-6 w-11 items-center rounded-full px-0.5 transition-colors"
+                :class="filters.excludeAds ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-muted)]'"
+              >
+                <span
+                  class="h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  :class="filters.excludeAds ? 'translate-x-5' : 'translate-x-0'"
+                />
+              </button>
+            </label>
+
+            <label class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-2.5 text-sm text-[var(--color-foreground)]">
+              <div>
+                <p class="font-medium">启用语义搜索</p>
+                <p class="text-xs text-[var(--color-muted-foreground)] mt-0.5">输入关键词时按语义相关度召回与排序，不只依赖字面匹配。</p>
+              </div>
+              <button
+                type="button"
+                @click="update('semanticSearch', !filters.semanticSearch)"
+                class="inline-flex h-6 w-11 items-center rounded-full px-0.5 transition-colors"
+                :class="filters.semanticSearch ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-muted)]'"
+              >
+                <span
+                  class="h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  :class="filters.semanticSearch ? 'translate-x-5' : 'translate-x-0'"
+                />
+              </button>
+            </label>
+          </div>
+        </div>
+
         <!-- Account filter -->
         <div v-if="articlesStore.accounts.length">
           <p class="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)] mb-2">公众号</p>

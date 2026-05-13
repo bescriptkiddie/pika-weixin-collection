@@ -15,6 +15,7 @@ import { useArticlesStore } from '@/stores/articles'
 import { useReadingStore } from '@/stores/reading'
 import { useConfigStore } from '@/stores/config'
 import { useFilters } from '@/composables/useFilters'
+import type { ExportFormat } from '@/types'
 import FilterBar from '@/components/articles/FilterBar.vue'
 import ArticleCard from '@/components/articles/ArticleCard.vue'
 import ArticleRow from '@/components/articles/ArticleRow.vue'
@@ -42,6 +43,71 @@ const { filters, filteredArticles, groupedArticles, resetFilters, activeFilterCo
 function markAllReadInView() {
   const ids = filteredArticles.value.map((a) => a.id)
   readingStore.markAllRead(ids)
+}
+
+function escapeCsv(value: unknown) {
+  const text = String(value ?? '')
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
+function downloadBlob(content: string, filename: string, type: string) {
+  const blob = new Blob([content], { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+function buildExportFilename(format: ExportFormat) {
+  const stamp = new Date().toISOString().slice(0, 10)
+  const scope = filters.accounts.length === 1 ? filters.accounts[0] : 'feed'
+  return `${scope}-${stamp}.${format === 'markdown' ? 'md' : format}`
+}
+
+function exportAsMarkdown() {
+  const lines = filteredArticles.value.map((article) => {
+    const digest = article.summary || article.digest || ''
+    const tags = article.tags?.length ? `\n标签：${article.tags.join('、')}` : ''
+    return `## ${article.title}\n\n- 公众号：${article.account}\n- 发布时间：${article.create_time}\n- 原文：${article.link}${tags}\n\n${digest}`
+  })
+  const title = filters.accounts.length === 1 ? filters.accounts[0] : '当前筛选结果'
+  const content = `# ${title}\n\n共 ${filteredArticles.value.length} 篇\n\n${lines.join('\n\n---\n\n')}\n`
+  downloadBlob(content, buildExportFilename('markdown'), 'text/markdown;charset=utf-8')
+}
+
+function exportAsCsv() {
+  const header = ['title', 'account', 'create_time', 'link', 'digest', 'summary', 'tags']
+  const rows = filteredArticles.value.map((article) => [
+    article.title,
+    article.account,
+    article.create_time,
+    article.link,
+    article.digest || '',
+    article.summary || '',
+    article.tags?.join('|') || '',
+  ])
+  const content = [header, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n')
+  downloadBlob(content, buildExportFilename('csv'), 'text/csv;charset=utf-8')
+}
+
+function exportAsJson() {
+  const content = JSON.stringify(filteredArticles.value, null, 2)
+  downloadBlob(content, buildExportFilename('json'), 'application/json;charset=utf-8')
+}
+
+function handleExport(format: ExportFormat) {
+  if (filteredArticles.value.length === 0) {
+    alert('当前筛选结果为空，无法导出')
+    return
+  }
+  if (format === 'markdown') exportAsMarkdown()
+  if (format === 'csv') exportAsCsv()
+  if (format === 'json') exportAsJson()
 }
 
 // 视图模式：'grid'=卡片视图（多列）/ 'list'=列表视图（单列紧凑）
@@ -244,6 +310,7 @@ function handleReset() {
         glass
         @update:filters="Object.assign(filters, $event)"
         @update:viewMode="viewMode = $event"
+        @export="handleExport"
         @reset="handleReset"
       />
       </div>

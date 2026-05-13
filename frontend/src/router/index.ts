@@ -8,24 +8,46 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import FeedView from '@/views/FeedView.vue'
 import ConfigView from '@/views/ConfigView.vue'
 import LogView from '@/views/LogView.vue'
+import StatsView from '@/views/StatsView.vue'
+import UnifiedContentView from '@/views/UnifiedContentView.vue'
+import SourcesView from '@/views/SourcesView.vue'
+import ContentLoopView from '@/views/ContentLoopView.vue'
 
 const router = createRouter({
-  // createWebHashHistory：URL 形如 http://localhost:5173/#/config
-  // 好处：刷新页面不会 404，不依赖服务器路由配置
   history: createWebHashHistory(),
   routes: [
     {
-      path: '/',         // 默认首页：文章信息流
+      path: '/',
+      name: 'home',
+      component: UnifiedContentView,
+    },
+    {
+      path: '/feed',
       name: 'feed',
       component: FeedView,
     },
     {
-      path: '/config',   // 公众号管理页：添加/删除/爬取/清理
+      path: '/sources',
+      name: 'sources',
+      component: SourcesView,
+    },
+    {
+      path: '/loop',
+      name: 'content-loop',
+      component: ContentLoopView,
+    },
+    {
+      path: '/stats',
+      name: 'stats',
+      component: StatsView,
+    },
+    {
+      path: '/config',
       name: 'config',
       component: ConfigView,
     },
     {
-      path: '/logs',     // 操作日志页：查看历史爬取、清理记录
+      path: '/logs',
       name: 'logs',
       component: LogView,
     },

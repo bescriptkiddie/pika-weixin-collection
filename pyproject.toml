@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "apscheduler>=3.11.0",
     "datasketch>=1.9.0",
     "drissionpage>=4.1.1.2",
     "fastapi>=0.135.1",

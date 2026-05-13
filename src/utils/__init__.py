@@ -8,17 +8,21 @@ from .data_manager import Message_Info, data_manager, headers
 from .helpers import (check_text_ratio, jstime2realtime, message_is_delete,
                       nunjucks_escape, realtime2jstime, time_delta, time_now,
                       url2text)
+from .semantic_similarity import cosine_similarity, normalize_text, vectorize_text
 
 __all__ = [
     'data_manager',
     'Message_Info',
     'headers',
     'time_now',
-    'time_delta', 
+    'time_delta',
     'jstime2realtime',
     'realtime2jstime',
     'url2text',
     'message_is_delete',
     'check_text_ratio',
     'nunjucks_escape',
-] 
+    'normalize_text',
+    'vectorize_text',
+    'cosine_similarity',
+]

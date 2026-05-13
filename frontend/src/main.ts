@@ -22,3 +22,9 @@ const app = createApp(App)
 app.use(pinia)   // 注册状态管理
 app.use(router)  // 注册路由
 app.mount('#app') // 挂载到 index.html 中的 <div id="app">
+
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}

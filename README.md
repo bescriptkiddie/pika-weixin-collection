@@ -1,6 +1,6 @@
 # pika-weixin-collection
 
-微信公众号聚合平台——爬取多个公众号的文章，在本地 Web 界面中进行筛选、过滤和阅读，可聚合多个公众号的优质文章统一阅读，AI 辅助分析。
+微信公众号聚合平台——在保留原有公众号抓取与阅读能力的基础上，已接入统一内容池、多来源信源和内容闭环视图，可在本地 Web 界面中统一筛选、阅读、同步和回写反馈。
 
 ![blog_preview.png](figures/blog_preview.png)
 
@@ -33,27 +33,36 @@ cd frontend && npm install && cd ..
 
 按 `Ctrl+C` 会结束前后端子进程。
 
-可选：启动前设置大模型打标地址（见下文「大模型打标签」）；`start_all.sh` 内对 `QWEN35_27B_ENDPOINT` 带有默认值，可按需 `export` 覆盖。
-
 ### 3. 首次使用：微信凭证
 
-1. 用上一节方式启动服务，浏览器打开 **http://127.0.0.1:5173**
+1. 启动服务后打开 **http://127.0.0.1:5173**
 2. 进入 **「配置」** 页
 3. 点击 **「扫码登录」**，按提示用微信扫描公众平台登录页；成功后 **token / cookie 会自动写入** `data/id_info.json`
 
 若凭证过期，配置页顶部会出现提示，同样通过 **扫码登录** 续期即可。
 
-### 4. 大模型打标签（可选）
+### 4. LLM 能力（可选）
 
-爬取到**新文章**时，若配置了 LLM 接口，会为每篇生成 `tags` 并写入 `message_info.json`，前端筛选栏与卡片可展示、过滤标签。
+#### 公众号新文章打标签与摘要
+
+爬取到**新文章**时，若配置了 LLM 接口，会为每篇生成 `tags` 与 `summary` 并写入 `message_info.json`。
 
 | 环境变量 | 说明 |
 |----------|------|
-| `QWEN35_27B_ENDPOINT` | 自部署或网关的 Chat Completions 兼容地址（POST JSON）。**未设置则跳过打标**，爬取与其它功能不受影响。 |
+| `QWEN35_27B_ENDPOINT` | 自部署或网关的 Chat Completions 兼容地址（POST JSON）。未设置则跳过公众号文章打标与摘要。 |
 | `QWEN35_27B_API_KEY` 或 `LLM_API_KEY` | 可选；若设置则请求头携带 `Authorization: Bearer <密钥>`。 |
 | `QWEN35_27B_MODEL` | 可选，默认 `Qwen3.5-27B`。 |
 
-标签由一组**种子标签**（含 **「广告」**）与模型扩展组成；若正文明显为推广、带货、商务合作、营销软文，提示词要求模型必须打上「广告」。单次请求失败时该篇可能无标签，不影响爬取落盘。
+#### 内容池 AI 富化
+
+统一内容池的 AI 分类与摘要使用独立配置：
+
+| 环境变量 | 说明 |
+|----------|------|
+| `CONTENT_LOOP_LLM_BASE_URL` 或 `CONTENT_LOOP_LLM_ENDPOINT` | OpenAI-compatible `/chat/completions` 地址或其 base URL。 |
+| `CONTENT_LOOP_LLM_API_KEY` | 内容池 AI 富化使用的 API key。 |
+| `CONTENT_LOOP_LLM_MODEL` | 可选，默认 `moonshot-v1-8k`。 |
+| `CONTENT_LOOP_LLM_TIMEOUT` | 可选，请求超时秒数。 |
 
 ### 5. 手动分启（备选）
 
@@ -70,17 +79,28 @@ cd frontend && npm run dev
 
 ## 功能说明
 
-### 前端界面
+### 页面与能力
 
-| 页面 / 功能模块 | 说明 |
-|----------------|------|
-| **文章信息流** | 卡片 / 列表两种视图；默认按日期分组；关键词搜索、公众号筛选、日期范围、排序与分组；单篇删除（黑名单，再次爬取不入库）；**Feed 界面主题**（奶白磨砂网格 / 清蓝网格 / 粉紫渐变玻璃等）在侧栏底部切换并持久化 |
-| **已读 / 收藏** | 点击文章标为已读；收藏与 FilterBar「全部 / 未读 / 收藏」；已读降低强调、未读圆点 |
-| **公众号管理（配置页）** | 搜索添加、移除、显示/隐藏；**扫码登录** 写入微信凭证；立即爬取与进度；缓存清理；凭证状态 |
-| **操作日志** | 爬取、账号、清理等记录（JSONL），时间轴与详情 |
-| **主题** | 全局浅色 / 深色 / 跟随系统；Feed 区独立界面预设（与上表「界面主题」一致） |
+| 页面 / 模块 | 说明 |
+|------------|------|
+| **内容池** | 首页 `/`，直接读取统一内容池，按来源类型、来源名、标签、AI 分类、人工决策、日期和关键词统一筛选。 |
+| **公众号 Feed** | `/feed` 保留原有公众号阅读视图，含导出、广告过滤、语义搜索、分组排序、已读/收藏。 |
+| **信源** | `/sources` 展示统一信源读模型，聚合公众号注册表与外部源配置，可逐个触发同步。 |
+| **闭环台** | `/loop` 提供同步公众号到内容池、同步外部源、批量打标签、AI 富化、人工反馈和新增视频/播客信源入口。 |
+| **配置** | `/config` 提供公众号管理、扫码登录、立即爬取、定时爬取、缓存清理、封面补全。 |
+| **统计** | `/stats` 展示最近 14 天发文趋势、总文章增长曲线，以及公众号近 7/30 天活跃度。 |
+| **日志** | `/logs` 展示公众号操作、多来源同步、标签、AI 富化、导出等日志。 |
 
-### 爬虫与数据
+### 多来源内容池
+
+- 首页内容池使用 `data/content_items.jsonl` 作为统一读模型
+- 当前已接入：公众号文章、GitHub 仓库、B 站视频、播客 / RSS
+- `/api/content-loop/sync-wechat` 将现有 `message_info.json` 标准化写入内容池
+- `/api/content-loop/sync-external` 按 `data/external_sources.json` 或 example 配置同步外部源
+- `/api/content-loop/feedback` 将人工判断写入 `data/feedback_events.jsonl`
+- `/api/content-loop/tagging` 和 `/api/content-loop/ai-enrich` 为内容池补充标签、AI 摘要与分类
+
+### 公众号数据链路
 
 - 支持按公众号 `fakeid` 批量拉取近一个月文章
 - 基于 `msgid-aid-create_time` 组合 ID 增量去重
@@ -88,61 +108,68 @@ cd frontend && npm run dev
 - 封面图落地 `data/covers/`，大图等比缩放；规避 CDN 防盗链
 - 爬取前凭证预检，失效时中止并提示
 - 重要操作写入 `data/operation_logs.jsonl`
-- MinHash+LSH 相似文检测（阈值 0.9 等，见文末实验表）
-- 可选：配置 `QWEN35_27B_ENDPOINT` 后为新文章打 `tags`
+- MinHash+LSH 相似文检测，并叠加本地轻量语义相似度补判
 
 ### 技术栈
 
 **前端：** Vue 3 · TypeScript · Vite · Tailwind CSS v4 · Pinia（持久化）· Vue Router · lucide-vue-next  
-
-**后端：** FastAPI · uvicorn · Pillow · requests · DrissionPage  
-
-**数据：** 本地 JSON（`data/`），无需数据库  
+**后端：** FastAPI · uvicorn · APScheduler · Pillow · requests · DrissionPage  
+**数据：** 本地 JSON / JSONL（`data/`），无需数据库  
 
 ---
 
 ## 目录结构
 
-```
+```text
 pika-weixin-collection/
-├── start_all.sh             # 一键启动前后端（开发）
-├── scripts/
-│   └── daily_update.sh      # 个人环境用定时/发布脚本示例（路径需自行改）
-├── api.py                   # FastAPI：账号、爬取、缓存、凭证、日志等
-├── pyproject.toml           # Python 依赖（uv）
+├── start_all.sh
+├── api.py
+├── pyproject.toml
 ├── data/
-│   ├── id_info.json         # 微信 token / cookie（配置页扫码写入，亦可手动）
-│   ├── name2fakeid.json     # 已添加公众号
-│   ├── message_info.json    # 文章主数据
-│   ├── message_detail_text.json  # 正文缓存（若启用）
-│   ├── deleted_article_ids.json
-│   ├── covers/              # 封面图缓存
+│   ├── id_info.json
+│   ├── name2fakeid.json
+│   ├── message_info.json
+│   ├── message_detail_text.json
+│   ├── content_items.jsonl
+│   ├── feedback_events.jsonl
+│   ├── external_sources.example.json
+│   ├── tag_taxonomy.example.json
+│   ├── covers/
 │   └── operation_logs.jsonl
 ├── src/
+│   ├── content_loop/
+│   │   ├── store.py
+│   │   ├── external_sources.py
+│   │   ├── media_sources.py
+│   │   ├── source_configs.py
+│   │   ├── tagging.py
+│   │   └── ai_enrichment.py
 │   ├── crawler/
-│   │   └── wechat_request.py
 │   ├── llm/
 │   │   ├── model_client.py
+│   │   ├── article_summary.py
 │   │   └── article_tagging.py
+│   ├── llm_wiki_bridge/
 │   └── utils/
-│       └── data_manager.py
-├── demo/                    # 静态 UI 参考（index.html 等）
 └── frontend/
-    ├── package.json
-    └── src/
-        ├── themes/feed-themes.ts   # Feed 界面预设 id
-        ├── styles/                 # 全局样式、主题预设 CSS
-        ├── types/index.ts
-        ├── stores/                 # articles / reading / config
-        ├── composables/useFilters.ts
-        ├── components/
-        │   ├── articles/           # ArticleCard、ArticleRow、FilterBar
-        │   ├── layout/             # AppSidebar、ThemeToggle、FeedThemePicker
-        │   └── ui/
-        └── views/
-            ├── FeedView.vue
-            ├── ConfigView.vue
-            └── LogView.vue
+    ├── src/
+    │   ├── App.vue
+    │   ├── router/index.ts
+    │   ├── stores/
+    │   │   ├── articles.ts
+    │   │   ├── contentItems.ts
+    │   │   ├── sources.ts
+    │   │   └── config.ts
+    │   └── views/
+    │       ├── UnifiedContentView.vue
+    │       ├── FeedView.vue
+    │       ├── SourcesView.vue
+    │       ├── ContentLoopView.vue
+    │       ├── StatsView.vue
+    │       ├── ConfigView.vue
+    │       └── LogView.vue
+    ├── public/
+    └── scripts/copy-static-data.mjs
 ```
 
 ---
@@ -152,46 +179,40 @@ pika-weixin-collection/
 ```bash
 cd frontend
 npm run build
-# 部署 dist/，并按需把仓库根目录 data/*.json（及 covers）提供给静态托管或同域 API
+# 构建产物会自动把 data/*.json、data/*.jsonl 以及存在的 covers 复制到 dist/data/
 ```
+
+### Docker Compose 一键部署
+
+```bash
+docker compose up --build
+```
+
+默认端口：
+- 前端预览：`http://127.0.0.1:4173`
+- 后端 API：`http://127.0.0.1:8000`
+
+Compose 会把仓库根目录 `data/` 挂载到后端容器内，前端容器在构建时会将已有 `data/` 内容复制进 `dist/data/`。
 
 ---
 
-## TODO
+## 当前进度
 
-### 爬虫 / 数据
+### 已完成
 
-- [x] **重复文章识别（规则 + 正文）**：先通过标题做候选筛选，再拉正文计算相似度，降低同一内容多次入库。
-- [x] **MinHash+LSH 去重**：已上线 0.9 阈值方案，见文末实验记录。
-- [ ] **向量语义去重**：引入向量模型，覆盖“标题不同但正文几乎一致”的重复内容。
-- [x] **爬取稳态能力**：已包含爬取频率控制、凭证失效扫码续期、删文检测、封面本地缓存、凭证预检、操作日志落盘。
-- [ ] **广告内容过滤**：在去重之外，补充广告/软文识别策略，减少低价值内容。
-- [x] **请求频率与代理兜底**：历史已验证，当前微信策略变化后该项默认弱化使用。
-- [ ] **定时自动爬取**：接入 APScheduler，并在配置页提供开关、执行时间、最近一次执行状态。
+- [x] 统一内容池首页 `/`
+- [x] 公众号兼容视图 `/feed`
+- [x] 统一信源页 `/sources`
+- [x] 内容闭环页 `/loop`
+- [x] 内容池接口并入 `api.py`
+- [x] 定时爬取、封面补全、导出、广告过滤、语义搜索、语义去重保留
+- [x] PWA、静态构建、Docker Compose 保留
 
-### 前端 / 阅读体验
+### 端到端验证结果
 
-- [x] **配置页核心能力**：公众号管理、筛选、日志、已读/收藏、凭证状态横幅与扫码登录。
-- [x] **Feed 主题系统**：奶白网格/清蓝网格/粉紫渐变玻璃，支持切换与本地持久化。
-- [ ] **统计图表页**：展示公众号发文频率趋势、总文章增长曲线、近 7/30 天活跃度。
-- [ ] **封面补全工具**：对历史缺失封面的文章批量补下载，并展示补全进度。
-- [ ] **数据导出能力**：将当前筛选结果导出为 Markdown、CSV、JSON。
-- [ ] **PWA 安装支持**：补齐 manifest 与离线缓存，支持桌面/手机添加到主屏。
-- [ ] **添加公众号连续录入体验**：点击“添加公众号”后自动聚焦输入框，添加成功后停留在添加流程以便连续录入。
-- [ ] **爬取进度文案优化**：每日爬取时，尽早展示当前账号名，避免“0/N”停留造成无响应错觉。
-
-### LLM
-
-- [x] **新文章自动打标签**：爬取后调用 `QWEN35_27B_*` 接口生成 `tags`。
-- [ ] **文章摘要生成**：为新文章生成 `summary`，并在信息流中展示摘要内容。
-- [ ] **语义搜索**：对文章向量化后支持自然语言检索与召回排序。
-
-### 部署
-
-- [ ] **静态部署验证**：已在 GitHub Pages 完成基础部署并支持站内搜索。
-- [x] **凭证失效引导**：前端可提示并引导扫码重新授权。
-- [ ] **Docker Compose 一键部署**：提供后端 + 前端统一编排，降低本地与服务器部署门槛。
-
+- [x] 运行一次 `/api/content-loop/sync-wechat`，确认本地 `content_items.jsonl` 创建或更新（当前结果：写入 230 条 `wechat_article`）
+- [x] 同步一个外部信源，确认内容真正进入内容池（当前结果：example 中 `horizon` GitHub 信源写入 6 条 `github_repo`）
+- [x] 页面级路由走查已完成首轮验证：`/#/`、`/#/feed`、`/#/sources`、`/#/loop`、`/#/stats`、`/#/config`、`/#/logs` 均通过浏览器级验证；其中 `/#/feed` 已额外确认“展开筛选”可点击，且高级筛选面板中的广告过滤与语义搜索控件可见
 ---
 
 ## MinHash 实验记录
