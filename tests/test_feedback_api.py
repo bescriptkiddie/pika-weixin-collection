@@ -31,6 +31,32 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 class FeedbackApiTests(unittest.TestCase):
+    def test_content_loop_overview_endpoint_returns_store_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            content_file = Path(tmp) / "content_items.jsonl"
+            feedback_file = Path(tmp) / "feedback_events.jsonl"
+            projection_file = Path(tmp) / "feedback_projection.jsonl"
+            sources_file = Path(tmp) / "external_sources.json"
+            write_jsonl(content_file, [{
+                "id": "item-1",
+                "source_type": "wechat_article",
+                "human_decision": "adopted",
+                "tags": ["AI"],
+                "ai_summary": "summary",
+            }])
+            write_jsonl(feedback_file, [{"item_id": "item-1", "event": "raise_item_score"}])
+            write_jsonl(projection_file, [{"scope": "tag", "key": "AI"}])
+            sources_file.write_text(json.dumps({"sources": [{"id": "rss-a", "type": "rss", "name": "RSS A", "enabled": True}]}, ensure_ascii=False), encoding="utf-8")
+
+            with patch("src.content_loop.store.CONTENT_ITEMS_FILE", content_file), patch("src.content_loop.store.FEEDBACK_EVENTS_FILE", feedback_file), patch("src.content_loop.store.FEEDBACK_PROJECTION_FILE", projection_file), patch("src.content_loop.store.EXTERNAL_SOURCES_FILE", sources_file), patch("src.content_loop.store.EXTERNAL_SOURCES_EXAMPLE_FILE", Path(tmp) / "missing.json"), patch("src.content_loop.store.DATA_DIR", Path(tmp)):
+                result = api.content_loop_overview()
+
+            self.assertEqual(result["content_items"], 1)
+            self.assertEqual(result["feedback_events"], 1)
+            self.assertEqual(result["feedback_projection_rules"], 1)
+            self.assertEqual(result["enabled_external_sources"], 1)
+            self.assertEqual(result["source_types"], {"wechat_article": 1})
+
     def test_content_loop_feedback_writes_event_and_updates_projection_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             content_file = Path(tmp) / "content_items.jsonl"

@@ -1295,6 +1295,14 @@ def list_generation_geo_api():
     return list_geo_variants()
 
 
+@app.get("/api/content-loop/overview")
+def content_loop_overview():
+    """返回内容闭环当前状态：内容池、反馈、外部源配置和公众号候选素材数量。"""
+    from src.content_loop import get_content_loop_overview
+
+    return get_content_loop_overview()
+
+
 @app.get("/api/content-loop/items")
 def content_loop_items(
     limit: int = 100,
