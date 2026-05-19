@@ -1019,6 +1019,7 @@ function sourceTypeLabel(type: string) {
   const labels: Record<string, string> = {
     wechat_article: '公众号',
     github_repo: 'GitHub',
+    bilibili_space: 'B站空间',
     bilibili_video: 'B站视频',
     podcast_episode: '播客',
     podcast_feed: '播客',

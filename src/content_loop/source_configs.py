@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .media_sources import extract_bilibili_bvid, _fetch_bilibili_metadata, _session
+from .media_sources import extract_bilibili_bvid, extract_bilibili_mid, _fetch_bilibili_metadata, _session
 from .store import DATA_DIR, EXTERNAL_SOURCES_FILE, content_hash, read_json, safe_slug
 
 
@@ -15,7 +15,7 @@ class SourceConfigError(RuntimeError):
 
 def infer_source_type(url: str, requested_type: str = "auto") -> str:
     normalized = requested_type.strip().lower() if requested_type else "auto"
-    if normalized in {"bilibili_video", "podcast_feed"}:
+    if normalized in {"bilibili_space", "bilibili_video", "podcast_feed"}:
         return normalized
     if normalized not in {"", "auto"}:
         raise SourceConfigError(f"不支持的信源类型：{requested_type}")
@@ -23,6 +23,8 @@ def infer_source_type(url: str, requested_type: str = "auto") -> str:
     parsed = urlparse(url)
     host = parsed.netloc.lower()
     path = parsed.path.lower()
+    if "space.bilibili.com" in host and extractable_mid(url):
+        return "bilibili_space"
     if "bilibili.com" in host or extractable_bvid(url):
         return "bilibili_video"
     if path.endswith((".xml", ".rss", ".atom")):
@@ -33,6 +35,14 @@ def infer_source_type(url: str, requested_type: str = "auto") -> str:
 def extractable_bvid(url: str) -> bool:
     try:
         extract_bilibili_bvid(url)
+    except Exception:
+        return False
+    return True
+
+
+def extractable_mid(url: str) -> bool:
+    try:
+        extract_bilibili_mid(url)
     except Exception:
         return False
     return True
@@ -56,6 +66,8 @@ def _write_config(path: Path, config: dict[str, Any]) -> None:
 
 
 def _default_tags(source_type: str) -> list[str]:
+    if source_type == "bilibili_space":
+        return ["B站", "视频转写", "外部源"]
     if source_type == "bilibili_video":
         return ["B站", "视频转写"]
     if source_type == "podcast_feed":
@@ -93,6 +105,38 @@ def _bilibili_source(
             "language": "zh",
             "snapshot_raw_sources": True,
             "tags": tags or _default_tags("bilibili_video"),
+            "initial_score": 0.7,
+        },
+    }
+
+
+def _bilibili_space_source(
+    *,
+    url: str,
+    name: str,
+    human_reason: str,
+    transcribe: bool,
+    tags: list[str] | None,
+    enabled: bool,
+) -> dict[str, Any]:
+    mid = extract_bilibili_mid(url)
+    source_name = name.strip() or f"B站空间 {mid}"
+    return {
+        "id": f"bilibili-space-{mid}",
+        "type": "bilibili_space",
+        "name": source_name,
+        "url": f"https://space.bilibili.com/{mid}/video",
+        "enabled": enabled,
+        "human_reason": human_reason.strip() or "B 站 UP 主空间批量进入统一内容池，用于追踪视频主题、转写和复盘。",
+        "options": {
+            "max_items": 100,
+            "transcribe": transcribe,
+            "asr_provider": "xiaomi_omni",
+            "asr_model": "mimo-v2-omni",
+            "max_completion_tokens": 12000,
+            "language": "zh",
+            "snapshot_raw_sources": True,
+            "tags": tags or _default_tags("bilibili_space"),
             "initial_score": 0.7,
         },
     }
@@ -144,6 +188,15 @@ def build_media_source_config(
     if not clean_url:
         raise SourceConfigError("url 不能为空")
     resolved_type = infer_source_type(clean_url, source_type)
+    if resolved_type == "bilibili_space":
+        return _bilibili_space_source(
+            url=clean_url,
+            name=name,
+            human_reason=human_reason,
+            transcribe=transcribe,
+            tags=tags,
+            enabled=enabled,
+        )
     if resolved_type == "bilibili_video":
         return _bilibili_source(
             url=clean_url,

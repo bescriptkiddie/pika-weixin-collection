@@ -12,6 +12,7 @@ const syncResult = ref('')
 const sourceTypeLabels: Record<string, string> = {
   wechat_account: '公众号',
   github_repo: 'GitHub',
+  bilibili_space: 'B站空间',
   bilibili_video: 'B站视频',
   podcast_feed: '播客 RSS',
   rss_feed: 'RSS',

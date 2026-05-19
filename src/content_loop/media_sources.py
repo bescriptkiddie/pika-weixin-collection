@@ -41,6 +41,20 @@ def extract_bilibili_bvid(url: str) -> str:
     return match.group(1)
 
 
+def extract_bilibili_mid(url: str) -> str:
+    clean_url = str(url or "").strip()
+    if re.fullmatch(r"\d{4,}", clean_url):
+        return clean_url
+    match = re.search(r"(?:^|//)space\.bilibili\.com/(\d{4,})(?:[/?#]|$)", clean_url)
+    if match:
+        return match.group(1)
+    parsed = urlparse(clean_url)
+    path_match = re.match(r"^/(\d{4,})(?:/|$)", parsed.path)
+    if parsed.netloc.lower().endswith("bilibili.com") and path_match:
+        return path_match.group(1)
+    raise MediaSourceImportError(f"无法从 URL 解析 B 站 UP 主 mid：{url}")
+
+
 def _session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
@@ -66,6 +80,14 @@ def _get_text(session: requests.Session, url: str, *, headers: dict[str, str] | 
     response = session.get(url, headers=headers, timeout=30)
     response.raise_for_status()
     return response.text
+
+
+def _bilibili_cookie_header() -> str:
+    cookie = _first_env("BILIBILI_COOKIE", "BILI_COOKIE")
+    if cookie:
+        return cookie
+    sessdata = _first_env("BILIBILI_SESSDATA")
+    return f"SESSDATA={sessdata}" if sessdata else ""
 
 
 def _timestamp_to_iso(value: Any) -> str:
@@ -304,6 +326,338 @@ def transcribe_audio_file(audio_path: str | Path, options: dict[str, Any] | None
 
 def _bilibili_headers(bvid: str) -> dict[str, str]:
     return {"Referer": f"https://www.bilibili.com/video/{bvid}/", "Origin": "https://www.bilibili.com"}
+
+
+def _bilibili_space_headers(mid: str) -> dict[str, str]:
+    headers = {
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": f"https://space.bilibili.com/{mid}/video",
+        "Origin": "https://space.bilibili.com",
+    }
+    cookie = _bilibili_cookie_header()
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
+
+
+def _fetch_bilibili_api(
+    session: requests.Session,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    response = session.get(url, params=params, headers=headers, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    if isinstance(payload, dict) and payload.get("code") not in (0, None):
+        raise MediaSourceImportError(f"B 站 API 返回错误：{payload.get('message') or payload.get('code')}")
+    if not isinstance(payload, dict):
+        raise MediaSourceImportError("B 站 API 返回了非 JSON 对象")
+    return payload
+
+
+def _fetch_bilibili_space_total(session: requests.Session, mid: str) -> int:
+    payload = _fetch_bilibili_api(
+        session,
+        "https://api.bilibili.com/x/space/navnum",
+        params={"mid": mid},
+        headers=_bilibili_space_headers(mid),
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    try:
+        return int(data.get("video") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_bilibili_archive(
+    archive: dict[str, Any],
+    *,
+    mid: str,
+    fetch_mode: str,
+    series_id: str = "",
+    series_name: str = "",
+) -> dict[str, Any] | None:
+    bvid = str(archive.get("bvid") or "").strip()
+    if not bvid:
+        return None
+    title = str(archive.get("title") or bvid).strip()
+    return {
+        "bvid": bvid,
+        "title": title,
+        "url": f"https://www.bilibili.com/video/{bvid}/",
+        "pubdate": archive.get("pubdate") or archive.get("created") or archive.get("ctime"),
+        "duration": archive.get("duration"),
+        "cover": archive.get("pic") or archive.get("cover") or "",
+        "desc": archive.get("desc") or "",
+        "mid": mid,
+        "series_id": series_id,
+        "series_name": series_name,
+        "fetch_mode": fetch_mode,
+    }
+
+
+def _dedupe_bilibili_archives(archives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_bvid: dict[str, dict[str, Any]] = {}
+    for archive in archives:
+        bvid = str(archive.get("bvid") or "").strip()
+        if not bvid:
+            continue
+        previous = by_bvid.get(bvid, {})
+        by_bvid[bvid] = {**previous, **archive}
+    return sorted(
+        by_bvid.values(),
+        key=lambda item: int(item.get("pubdate") or 0) if str(item.get("pubdate") or "").isdigit() else 0,
+        reverse=True,
+    )
+
+
+def _preloaded_bilibili_archives(source: dict[str, Any], mid: str) -> list[dict[str, Any]]:
+    options = source.get("options") if isinstance(source.get("options"), dict) else {}
+    raw_items = options.get("bvids") or options.get("video_bvids") or []
+    if not isinstance(raw_items, list):
+        return []
+    archives: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        if isinstance(raw_item, str):
+            archive = {"bvid": raw_item}
+        elif isinstance(raw_item, dict):
+            archive = raw_item
+        else:
+            continue
+        normalized = _normalize_bilibili_archive(
+            archive,
+            mid=mid,
+            fetch_mode="preloaded_bvids",
+            series_id=str(archive.get("series_id") or "") if isinstance(archive, dict) else "",
+            series_name=str(archive.get("series_name") or "") if isinstance(archive, dict) else "",
+        )
+        if normalized:
+            archives.append(normalized)
+    return _dedupe_bilibili_archives(archives)
+
+
+def _fetch_bilibili_space_arc_archives(
+    session: requests.Session,
+    mid: str,
+    *,
+    max_items: int,
+) -> tuple[list[dict[str, Any]], int]:
+    archives: list[dict[str, Any]] = []
+    total = 0
+    page = 1
+    page_size = min(max(max_items, 1), 50)
+    while len(archives) < max_items:
+        payload = _fetch_bilibili_api(
+            session,
+            "https://api.bilibili.com/x/space/arc/search",
+            params={
+                "mid": mid,
+                "ps": page_size,
+                "pn": page,
+                "order": "pubdate",
+                "jsonp": "jsonp",
+            },
+            headers=_bilibili_space_headers(mid),
+        )
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        page_info = data.get("page") if isinstance(data.get("page"), dict) else {}
+        try:
+            total = int(page_info.get("count") or total or 0)
+        except (TypeError, ValueError):
+            total = 0
+        archive_list = data.get("list", {}).get("vlist") if isinstance(data.get("list"), dict) else []
+        if not isinstance(archive_list, list) or not archive_list:
+            break
+        for archive in archive_list:
+            if not isinstance(archive, dict):
+                continue
+            normalized = _normalize_bilibili_archive(archive, mid=mid, fetch_mode="space_arc_search")
+            if normalized:
+                archives.append(normalized)
+        if total and len(archives) >= total:
+            break
+        page += 1
+    return archives[:max_items], total
+
+
+def _fetch_bilibili_series_archives(
+    session: requests.Session,
+    mid: str,
+    *,
+    series_id: str,
+    series_name: str,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    archives: list[dict[str, Any]] = []
+    page = 1
+    page_size = min(max(max_items, 1), 100)
+    total = 0
+    while len(archives) < max_items:
+        payload = _fetch_bilibili_api(
+            session,
+            "https://api.bilibili.com/x/series/archives",
+            params={
+                "mid": mid,
+                "series_id": series_id,
+                "pn": page,
+                "ps": page_size,
+                "only_normal": "true",
+                "sort": "desc",
+            },
+            headers=_bilibili_space_headers(mid),
+        )
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        page_info = data.get("page") if isinstance(data.get("page"), dict) else {}
+        try:
+            total = int(page_info.get("total") or total or 0)
+        except (TypeError, ValueError):
+            total = 0
+        archive_list = data.get("archives") if isinstance(data.get("archives"), list) else []
+        if not archive_list:
+            break
+        for archive in archive_list:
+            if not isinstance(archive, dict):
+                continue
+            normalized = _normalize_bilibili_archive(
+                archive,
+                mid=mid,
+                fetch_mode="space_series_archives",
+                series_id=series_id,
+                series_name=series_name,
+            )
+            if normalized:
+                archives.append(normalized)
+        if total and len(archives) >= total:
+            break
+        page += 1
+    return archives[:max_items]
+
+
+def _fetch_bilibili_space_series_archives(
+    session: requests.Session,
+    mid: str,
+    *,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    archives: list[dict[str, Any]] = []
+    seen_series: set[str] = set()
+    payload = _fetch_bilibili_api(
+        session,
+        "https://api.bilibili.com/x/polymer/web-space/home/seasons_series",
+        params={"mid": mid, "page_num": 1, "page_size": 20},
+        headers=_bilibili_space_headers(mid),
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    items_lists = data.get("items_lists") if isinstance(data.get("items_lists"), dict) else {}
+    for bucket_name in ("series_list", "seasons_list"):
+        bucket = items_lists.get(bucket_name)
+        if not isinstance(bucket, list):
+            continue
+        for series in bucket:
+            if not isinstance(series, dict):
+                continue
+            meta = series.get("meta") if isinstance(series.get("meta"), dict) else {}
+            series_id = str(meta.get("series_id") or meta.get("season_id") or "").strip()
+            if not series_id or series_id in seen_series:
+                continue
+            seen_series.add(series_id)
+            series_name = str(meta.get("name") or "").strip()
+            inline_archives = series.get("archives") if isinstance(series.get("archives"), list) else []
+            for archive in inline_archives:
+                if not isinstance(archive, dict):
+                    continue
+                normalized = _normalize_bilibili_archive(
+                    archive,
+                    mid=mid,
+                    fetch_mode="space_series_inline",
+                    series_id=series_id,
+                    series_name=series_name,
+                )
+                if normalized:
+                    archives.append(normalized)
+            try:
+                series_total = int(meta.get("total") or 0)
+            except (TypeError, ValueError):
+                series_total = 0
+            if series_total and len([item for item in archives if item.get("series_id") == series_id]) < series_total:
+                archives.extend(
+                    _fetch_bilibili_series_archives(
+                        session,
+                        mid,
+                        series_id=series_id,
+                        series_name=series_name,
+                        max_items=max_items,
+                    )
+                )
+            if len(_dedupe_bilibili_archives(archives)) >= max_items:
+                return _dedupe_bilibili_archives(archives)[:max_items]
+    return _dedupe_bilibili_archives(archives)[:max_items]
+
+
+def list_bilibili_space_videos(
+    source: dict[str, Any],
+    *,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    session = session or _session()
+    url = source.get("url") or ""
+    mid = extract_bilibili_mid(url)
+    options = source.get("options") if isinstance(source.get("options"), dict) else {}
+    max_items = max(1, int(options.get("max_items") or 100))
+    errors: list[str] = []
+    fetch_modes: list[str] = []
+    total = 0
+    archives: list[dict[str, Any]] = []
+
+    try:
+        total = _fetch_bilibili_space_total(session, mid)
+    except Exception as exc:  # noqa: BLE001 - keep partial sync visible
+        errors.append(f"空间视频总数读取失败：{exc}")
+
+    preloaded_archives = _preloaded_bilibili_archives(source, mid)
+    if preloaded_archives:
+        fetch_modes.append("preloaded_bvids")
+        archives.extend(preloaded_archives)
+
+    expected_total = min(max_items, total or len(preloaded_archives) or max_items)
+    if len(_dedupe_bilibili_archives(archives)) < expected_total:
+        try:
+            arc_archives, arc_total = _fetch_bilibili_space_arc_archives(session, mid, max_items=max_items)
+            if arc_total:
+                total = arc_total
+            if arc_archives:
+                fetch_modes.append("space_arc_search")
+                archives.extend(arc_archives)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"空间视频列表接口受限：{exc}")
+
+    expected_total = min(max_items, total or len(preloaded_archives) or max_items)
+    if len(_dedupe_bilibili_archives(archives)) < expected_total:
+        try:
+            series_archives = _fetch_bilibili_space_series_archives(session, mid, max_items=max_items)
+            if series_archives:
+                fetch_modes.append("space_series_archives")
+                archives.extend(series_archives)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"合集/列表兜底读取失败：{exc}")
+
+    archives = _dedupe_bilibili_archives(archives)[:max_items]
+    if total and len(archives) < min(total, max_items):
+        errors.append(
+            f"当前公开接口只发现 {len(archives)}/{min(total, max_items)} 个视频；完整列表需要登录态 Cookie 或通过 B 站验证码后再同步。"
+        )
+
+    return {
+        "mid": mid,
+        "space_video_total": total,
+        "archives": archives,
+        "archives_discovered": len(archives),
+        "fetch_modes": fetch_modes or ["none"],
+        "errors": errors,
+        "max_items": max_items,
+    }
 
 
 def _fetch_bilibili_metadata(session: requests.Session, bvid: str) -> dict[str, Any]:
@@ -560,6 +914,81 @@ def sync_bilibili_video_source(
         "snapshot_raw_sources": bool(options.get("snapshot_raw_sources", False)),
         "raw_sources_dir": str(Path(export_root) / RAW_BILIBILI_ROOT / safe_slug(source["id"], "source"))
         if bool(options.get("snapshot_raw_sources", False))
+        else "",
+    }
+
+
+def sync_bilibili_space_source(
+    source: dict[str, Any],
+    *,
+    session: requests.Session | None = None,
+    export_root: str | Path = DEFAULT_EXPORT_ROOT,
+) -> dict[str, Any]:
+    session = session or _session()
+    options = source.get("options") if isinstance(source.get("options"), dict) else {}
+    listing = list_bilibili_space_videos(source, session=session)
+    mid = str(listing.get("mid") or extract_bilibili_mid(source.get("url") or ""))
+    archives = listing.get("archives") if isinstance(listing.get("archives"), list) else []
+    errors = list(listing.get("errors") or [])
+    content_items: list[dict[str, Any]] = []
+    synced_bvids: list[str] = []
+
+    for archive in archives:
+        if not isinstance(archive, dict):
+            continue
+        bvid = str(archive.get("bvid") or "").strip()
+        if not bvid:
+            continue
+        video_source = {
+            **source,
+            "type": "bilibili_video",
+            "url": f"https://www.bilibili.com/video/{bvid}/",
+            "options": options,
+        }
+        try:
+            result = sync_bilibili_video_source(video_source, session=session, export_root=export_root)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{bvid} 同步失败：{exc}")
+            continue
+        errors.extend(result.get("errors") or [])
+        items = result.get("content_items") if isinstance(result.get("content_items"), list) else []
+        for item in items:
+            item["source_id"] = source["id"]
+            item["source_name"] = f"B站 / {source.get('name') or source['id']}"
+            item["tags"] = options.get("tags", item.get("tags", []))
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            item["metadata"] = {
+                **metadata,
+                "space_mid": mid,
+                "space_url": f"https://space.bilibili.com/{mid}/video",
+                "space_source_id": source["id"],
+                "space_source_type": source.get("type") or "bilibili_space",
+                "space_list_fetch_mode": archive.get("fetch_mode") or "",
+                "space_series_id": archive.get("series_id") or "",
+                "space_series_name": archive.get("series_name") or "",
+            }
+            for reference in item.get("references") or []:
+                if isinstance(reference, dict) and reference.get("type") == "bilibili_video":
+                    reference["source_id"] = source["id"]
+            content_items.append(item)
+            synced_bvids.append(str(item.get("metadata", {}).get("bvid") or bvid))
+
+    snapshot_enabled = bool(options.get("snapshot_raw_sources", False))
+    return {
+        "source_id": source["id"],
+        "source_type": source.get("type") or "bilibili_space",
+        "items_fetched": len(content_items),
+        "raw_items": len(archives),
+        "content_items": content_items,
+        "errors": errors,
+        "fetch_mode": ",".join(listing.get("fetch_modes") or []) or "bilibili_space",
+        "space_mid": mid,
+        "space_video_total": listing.get("space_video_total") or 0,
+        "archives_discovered": listing.get("archives_discovered") or len(archives),
+        "synced_bvids": synced_bvids,
+        "snapshot_raw_sources": snapshot_enabled,
+        "raw_sources_dir": str(Path(export_root) / RAW_BILIBILI_ROOT / safe_slug(source["id"], "source"))
+        if snapshot_enabled
         else "",
     }
 

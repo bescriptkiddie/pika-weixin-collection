@@ -20,7 +20,7 @@ from .store import (
     upsert_content_items,
     write_jsonl,
 )
-from .media_sources import sync_bilibili_video_source, sync_podcast_feed_source
+from .media_sources import sync_bilibili_space_source, sync_bilibili_video_source, sync_podcast_feed_source
 
 DEFAULT_EXPORT_ROOT = DATA_DIR / "llm_wiki" / "wechat_oa"
 RAW_GITHUB_ROOT = Path("raw") / "sources" / "github"
@@ -459,6 +459,8 @@ def sync_external_sources(
         try:
             if source_type == "github_repo":
                 result = sync_github_repo_source(source, export_root=export_root)
+            elif source_type == "bilibili_space":
+                result = sync_bilibili_space_source(source, export_root=export_root)
             elif source_type == "bilibili_video":
                 result = sync_bilibili_video_source(source, export_root=export_root)
             elif source_type == "podcast_feed":
