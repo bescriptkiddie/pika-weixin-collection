@@ -16,6 +16,8 @@ FEEDBACK_EVENTS_FILE = DATA_DIR / "feedback_events.jsonl"
 EXTERNAL_SOURCES_FILE = DATA_DIR / "external_sources.json"
 EXTERNAL_SOURCES_EXAMPLE_FILE = DATA_DIR / "external_sources.example.json"
 
+FEEDBACK_PROJECTION_FILE = DATA_DIR / "feedback_projection.jsonl"
+
 PRESERVED_ITEM_FIELDS = {
     "human_decision",
     "feedback_notes",
@@ -265,6 +267,12 @@ def sync_wechat_content_items(*, path: str | Path = CONTENT_ITEMS_FILE) -> dict[
     return result
 
 
+def _apply_feedback_projection(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from .feedback_projection import apply_feedback_projection
+
+    return apply_feedback_projection(rows, projection_path=FEEDBACK_PROJECTION_FILE)
+
+
 def list_content_items(
     *,
     limit: int = 100,
@@ -275,6 +283,7 @@ def list_content_items(
     path: str | Path = CONTENT_ITEMS_FILE,
 ) -> list[dict[str, Any]]:
     rows = read_jsonl(Path(path))
+    rows = _apply_feedback_projection(rows)
     if source_type:
         rows = [row for row in rows if row.get("source_type") == source_type]
     if tag:
@@ -303,9 +312,13 @@ def record_feedback_event(
     suggested_action: str = "",
     channel: str = "local_web",
     weight: float = 1.0,
-    content_items_path: str | Path = CONTENT_ITEMS_FILE,
-    feedback_events_path: str | Path = FEEDBACK_EVENTS_FILE,
+    content_items_path: str | Path | None = None,
+    feedback_events_path: str | Path | None = None,
+    feedback_projection_path: str | Path | None = None,
 ) -> dict[str, Any]:
+    target_content_items_path = Path(content_items_path) if content_items_path is not None else CONTENT_ITEMS_FILE
+    target_feedback_events_path = Path(feedback_events_path) if feedback_events_path is not None else FEEDBACK_EVENTS_FILE
+    target_feedback_projection_path = Path(feedback_projection_path) if feedback_projection_path is not None else FEEDBACK_PROJECTION_FILE
     created_at = now_local_iso()
     feedback = {
         "item_id": item_id,
@@ -317,9 +330,9 @@ def record_feedback_event(
         "weight": weight,
         "created_at": created_at,
     }
-    append_jsonl(Path(feedback_events_path), feedback)
+    append_jsonl(target_feedback_events_path, feedback)
 
-    rows = read_jsonl(Path(content_items_path))
+    rows = read_jsonl(target_content_items_path)
     updated_item: dict[str, Any] | None = None
     for item in rows:
         if item.get("id") != item_id:
@@ -336,7 +349,15 @@ def record_feedback_event(
         updated_item = item
         break
     if updated_item is not None:
-        write_jsonl(Path(content_items_path), rows)
+        write_jsonl(target_content_items_path, rows)
+
+    from .feedback_projection import build_feedback_projection
+
+    build_feedback_projection(
+        content_items_path=target_content_items_path,
+        feedback_events_path=target_feedback_events_path,
+        projection_path=target_feedback_projection_path,
+    )
 
     response_item = None
     if updated_item is not None:
@@ -365,6 +386,7 @@ def count_wechat_candidates() -> int:
 def get_content_loop_overview() -> dict[str, Any]:
     items = read_jsonl(CONTENT_ITEMS_FILE)
     feedback_events = read_jsonl(FEEDBACK_EVENTS_FILE)
+    feedback_projection = read_jsonl(FEEDBACK_PROJECTION_FILE)
     source_configs = load_external_source_configs(allow_example=True)
     source_types = Counter(str(item.get("source_type") or "unknown") for item in items)
     human_decisions = Counter(str(item.get("human_decision") or "candidate") for item in items)
@@ -382,6 +404,7 @@ def get_content_loop_overview() -> dict[str, Any]:
     return {
         "content_items": len(items),
         "feedback_events": len(feedback_events),
+        "feedback_projection_rules": len(feedback_projection),
         "wechat_candidates": count_wechat_candidates(),
         "external_sources": len(sources),
         "enabled_external_sources": sum(1 for source in sources if source.get("enabled")),
@@ -394,6 +417,7 @@ def get_content_loop_overview() -> dict[str, Any]:
         "auto_tag_counts": dict(auto_tag_counts.most_common()),
         "content_items_file": str(CONTENT_ITEMS_FILE),
         "feedback_events_file": str(FEEDBACK_EVENTS_FILE),
+        "feedback_projection_file": str(FEEDBACK_PROJECTION_FILE),
         "source_config_file": source_configs["path"],
         "source_config_is_example": bool(source_configs["using_example"]),
         "last_content_pool_update": last_update,

@@ -53,6 +53,9 @@ const LOG_META: Record<string, { label: string; color: string; bg: string; icon:
   feedback_event: { label: '人工反馈', color: 'text-amber-500', bg: 'bg-amber-500/10', icon: CircleCheck },
   tagging_run:    { label: '批量打标签', color: 'text-lime-500', bg: 'bg-lime-500/10', icon: CircleCheck },
   ai_enrich:      { label: 'AI 富化', color: 'text-pink-500', bg: 'bg-pink-500/10', icon: CircleCheck },
+  execution_run_completed: { label: '执行完成', color: 'text-emerald-500', bg: 'bg-emerald-500/10', icon: CircleCheck },
+  execution_run_failed: { label: '执行失败', color: 'text-red-500', bg: 'bg-red-500/10', icon: AlertTriangle },
+  execution_run_rejected: { label: '人工拒绝', color: 'text-orange-500', bg: 'bg-orange-500/10', icon: AlertTriangle },
 }
 
 /** 根据日志类型获取元数据，未知类型返回默认样式 */

@@ -5,26 +5,11 @@ import { RouterLink } from 'vue-router'
 import type { ContentLoopItem } from '@/types'
 import { useContentItemsStore } from '@/stores/contentItems'
 
-const props = defineProps<{
-  selectedSourceType: string
-}>()
-
-const emit = defineEmits<{
-  'update:selectedSourceType': [value: string]
-}>()
-
+const props = defineProps<{ selectedSourceType: string }>()
+const emit = defineEmits<{ 'update:selectedSourceType': [value: string] }>()
 const contentItemsStore = useContentItemsStore()
 const feedbackingId = ref('')
-const filters = reactive({
-  keyword: '',
-  sourceType: '',
-  sourceName: '',
-  humanDecision: '',
-  aiCategory: '',
-  tag: '',
-  dateFrom: '',
-  dateTo: '',
-})
+const filters = reactive({ keyword: '', sourceType: '', sourceName: '', humanDecision: '', aiCategory: '', tag: '', dateFrom: '', dateTo: '' })
 
 const sourceTypeLabels: Record<string, string> = {
   wechat_article: '公众号',
@@ -37,71 +22,26 @@ const sourceTypeLabels: Record<string, string> = {
 }
 
 const decisionLabels: Record<string, string> = {
-  candidate: '候选',
-  adopted: '采纳',
-  rejected: '删除',
-  rewrite: '改写',
-  dig_deeper: '深挖',
-  not_relevant: '不相关',
+  candidate: '候选', adopted: '采纳', rejected: '删除', rewrite: '改写', dig_deeper: '深挖', not_relevant: '不相关',
 }
 
-const sourceTypeOptions = computed(() => Object.entries(contentItemsStore.sourceTypeCounts)
-  .sort((a, b) => b[1] - a[1])
-  .map(([type, count]) => ({
-    type,
-    label: sourceTypeLabels[type] ?? type,
-    count,
-  })))
-
-const sourceNameOptions = computed(() => Array.from(new Set(
-  contentItemsStore.items
-    .filter((item) => !filters.sourceType || item.source_type === filters.sourceType)
-    .map((item) => item.source_name)
-    .filter(Boolean),
-)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
-
-const decisionOptions = computed(() => Array.from(new Set(
-  contentItemsStore.items
-    .map((item) => item.human_decision)
-    .filter(Boolean),
-)).sort())
-
-const aiCategoryOptions = computed(() => Array.from(new Set(
-  contentItemsStore.items
-    .map((item) => item.ai_category || '')
-    .filter(Boolean),
-)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
-
-const tagOptions = computed(() => Array.from(new Set(
-  contentItemsStore.items.flatMap((item) => item.tags || []),
-)).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
-
+const sourceTypeOptions = computed(() => Object.entries(contentItemsStore.sourceTypeCounts).sort((a, b) => b[1] - a[1]).map(([type, count]) => ({ type, label: sourceTypeLabels[type] ?? type, count })))
+const sourceNameOptions = computed(() => Array.from(new Set(contentItemsStore.items.filter((item) => !filters.sourceType || item.source_type === filters.sourceType).map((item) => item.source_name).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
+const decisionOptions = computed(() => Array.from(new Set(contentItemsStore.items.map((item) => item.human_decision).filter(Boolean))).sort())
+const aiCategoryOptions = computed(() => Array.from(new Set(contentItemsStore.items.map((item) => item.ai_category || '').filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
+const tagOptions = computed(() => Array.from(new Set(contentItemsStore.items.flatMap((item) => item.tags || []))).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN')))
 const filteredItems = computed(() => contentItemsStore.items.filter((item) => matchesFilters(item)))
-
 const pageTitle = computed(() => filters.sourceType === 'wechat_article' ? '公众号视图' : '统一内容池')
-const pageSubtitle = computed(() => filters.sourceType === 'wechat_article'
-  ? '公众号内容已降级为内容池里的一个来源筛选视图。'
-  : '首页直接读取 /api/content-loop/items，按来源、标签、AI 状态和人工决策统一筛选。')
+const pageSubtitle = computed(() => filters.sourceType === 'wechat_article' ? '公众号内容已降级为内容池里的一个来源筛选视图。' : '首页直接读取 /api/content-loop/items，按来源、标签、AI 状态和人工决策统一筛选。')
 
-watch(
-  () => props.selectedSourceType,
-  (value) => {
-    if (value !== filters.sourceType) {
-      filters.sourceType = value || ''
-    }
-  },
-  { immediate: true },
-)
+watch(() => props.selectedSourceType, (value) => {
+  if (value !== filters.sourceType) filters.sourceType = value || ''
+}, { immediate: true })
 
-watch(
-  () => filters.sourceType,
-  (value) => {
-    emit('update:selectedSourceType', value || '')
-    if (!value) {
-      filters.sourceName = ''
-    }
-  },
-)
+watch(() => filters.sourceType, (value) => {
+  emit('update:selectedSourceType', value || '')
+  if (!value) filters.sourceName = ''
+})
 
 onMounted(async () => {
   if (!contentItemsStore.items.length) {
@@ -118,50 +58,21 @@ function decisionLabel(decision: string) {
 }
 
 function matchesFilters(item: ContentLoopItem) {
-  if (filters.sourceType && item.source_type !== filters.sourceType) {
-    return false
-  }
-
-  if (filters.sourceName && item.source_name !== filters.sourceName) {
-    return false
-  }
-
-  if (filters.humanDecision && item.human_decision !== filters.humanDecision) {
-    return false
-  }
-
-  if (filters.aiCategory && item.ai_category !== filters.aiCategory) {
-    return false
-  }
-
-  if (filters.tag && !(item.tags || []).includes(filters.tag)) {
-    return false
-  }
+  if (filters.sourceType && item.source_type !== filters.sourceType) return false
+  if (filters.sourceName && item.source_name !== filters.sourceName) return false
+  if (filters.humanDecision && item.human_decision !== filters.humanDecision) return false
+  if (filters.aiCategory && item.ai_category !== filters.aiCategory) return false
+  if (filters.tag && !(item.tags || []).includes(filters.tag)) return false
 
   const publishedAt = item.published_at || item.fetched_at || ''
   const itemDate = publishedAt.slice(0, 10)
-  if (filters.dateFrom && itemDate < filters.dateFrom) {
-    return false
-  }
-  if (filters.dateTo && itemDate > filters.dateTo) {
-    return false
-  }
+  if (filters.dateFrom && itemDate < filters.dateFrom) return false
+  if (filters.dateTo && itemDate > filters.dateTo) return false
 
   const keyword = filters.keyword.trim().toLowerCase()
-  if (!keyword) {
-    return true
-  }
+  if (!keyword) return true
 
-  const haystack = [
-    item.title,
-    item.summary,
-    item.ai_summary || '',
-    item.content_preview,
-    item.source_name,
-    item.author,
-    ...(item.tags || []),
-  ].join('\n').toLowerCase()
-
+  const haystack = [item.title, item.summary, item.ai_summary || '', item.content_preview, item.source_name, item.author, ...(item.tags || [])].join('\n').toLowerCase()
   return haystack.includes(keyword)
 }
 
@@ -178,22 +89,15 @@ function resetFilters() {
 
 async function submitFeedback(item: ContentLoopItem, humanDecision: string, suggestedAction: string) {
   const note = window.prompt('人工备注（可留空）', '')
-  if (note === null) {
-    return
-  }
-
+  if (note === null) return
   feedbackingId.value = item.id
   try {
-    await contentItemsStore.sendFeedback({
-      itemId: item.id,
-      humanDecision,
-      feedbackNote: note,
-      suggestedAction,
-    })
+    await contentItemsStore.sendFeedback({ itemId: item.id, humanDecision, feedbackNote: note, suggestedAction })
   } finally {
     feedbackingId.value = ''
   }
 }
+
 </script>
 
 <template>

@@ -299,6 +299,25 @@ LOG_EXTERNAL_SOURCE_ADD = "external_source_add"
 LOG_FEEDBACK_EVENT = "feedback_event"
 LOG_TAGGING_RUN = "tagging_run"
 LOG_AI_ENRICH = "ai_enrich"
+LOG_EXECUTION_RUN_COMPLETED = "execution_run_completed"
+LOG_EXECUTION_RUN_FAILED = "execution_run_failed"
+LOG_EXECUTION_RUN_REJECTED = "execution_run_rejected"
+LOG_EXECUTION_RUN_DEGRADED = "execution_run_degraded"
+
+
+def _append_execution_outcome(run: dict, message: str, details: dict | None = None) -> None:
+    payload = {"run_id": run.get("run_id", ""), "execution_status": run.get("status", "")}
+    if details:
+        payload.update(details)
+    status = str(run.get("status") or "")
+    if status == "rejected":
+        _append_log(LOG_EXECUTION_RUN_REJECTED, message, payload)
+    elif status == "degraded":
+        _append_log(LOG_EXECUTION_RUN_DEGRADED, message, payload)
+    elif status == "failed":
+        _append_log(LOG_EXECUTION_RUN_FAILED, message, payload)
+    else:
+        _append_log(LOG_EXECUTION_RUN_COMPLETED, message, payload)
 
 
 def _append_log(log_type: str, message: str, details: dict | None = None) -> None:
@@ -940,7 +959,7 @@ def get_crawl_status():
     return CrawlStatus(**_crawl_state)
 
 
-@app.post("/api/wiki/export-sources", response_model=WikiExportResult)
+@app.post("/api/wiki/export-sources")
 def export_wiki_sources():
     """
     将当前已采集文章导出为 llm_wiki 兼容的 raw sources。
@@ -949,28 +968,331 @@ def export_wiki_sources():
     可以读取 data/llm_wiki/wechat_oa/raw/sources/wechat 下的 Markdown。
     """
     try:
+        from src.execution import ExecutionActionError, execute_sync_action
         from src.llm_wiki_bridge import export_llm_wiki_sources
 
-        result = export_llm_wiki_sources()
+        execution = execute_sync_action(
+            intent="export_wiki",
+            task_kind="export_wiki",
+            context={"export_root": "data/llm_wiki/wechat_oa"},
+            artifact_type="wiki_source_pack",
+            action=lambda execution_ctx: export_llm_wiki_sources(
+                trace={
+                    "run_id": execution_ctx["run_id"],
+                    "task_id": execution_ctx["task_id"],
+                },
+            ).__dict__,
+            summarize=lambda payload: f"同步 llm_wiki sources：{payload['exported']} 篇文章",
+        )
+        result = execution["result"]
         _append_log(
             LOG_WIKI_EXPORT,
-            f"同步 llm_wiki sources：{result.exported} 篇文章",
-            result.__dict__,
+            f"同步 llm_wiki sources：{result['exported']} 篇文章",
+            {**result, "run_id": execution['run']['run_id']},
         )
-        return WikiExportResult(**result.__dict__)
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"export_wiki 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"导出 llm_wiki sources 失败：{e}（run {e.run_id}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出 llm_wiki sources 失败：{e}")
 
 
-# ── 内容闭环 API ────────────────────────────────────────────────────────────────
-# 这组接口把公众号缓存、外部源、统一内容池和人工反馈接起来。
 
-@app.get("/api/content-loop/overview")
-def content_loop_overview():
-    """返回内容闭环当前状态：内容池、反馈、外部源配置和公众号候选素材数量。"""
-    from src.content_loop import get_content_loop_overview
 
-    return get_content_loop_overview()
+@app.post("/api/wiki/build-knowledge-candidates")
+def build_wiki_knowledge_candidates(limit: int = 30, projected_action: str | None = None, item_ids: str | None = None):
+    try:
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
+        from src.llm_wiki_bridge import build_knowledge_candidates
+
+        selected_item_ids = [part.strip() for part in (item_ids or "").split(",") if part.strip()]
+        execution = execute_sync_action(
+            intent="build_knowledge",
+            task_kind="build_knowledge_candidates",
+            context={"limit": limit, "projected_action": projected_action or "", "item_ids": selected_item_ids},
+            artifact_type="knowledge_candidates",
+            action=lambda execution_ctx: build_knowledge_candidates(
+                limit=limit,
+                projected_action=projected_action or None,
+                item_ids=selected_item_ids,
+                trace={
+                    "run_id": execution_ctx["run_id"],
+                    "task_id": execution_ctx["task_id"],
+                },
+            ).__dict__,
+            summarize=lambda payload: f"知识候选：生成 {payload['candidates']} 条候选，主题 {payload['synthesis']} 条",
+            build_review=lambda payload: build_review_packet(
+                kind="knowledge_candidates_review",
+                run_id="",
+                task_id="",
+                reason="知识候选已生成，等待人工批准后写入 llm_wiki",
+                candidate_payload=payload,
+                suggested_action="review_knowledge_candidates",
+            ) if payload.get("candidates") or payload.get("synthesis") else None,
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"build_knowledge 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"生成知识候选失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成知识候选失败：{e}")
+
+
+@app.post("/api/wiki/build-topic-synthesis")
+def build_wiki_topic_synthesis(limit: int = 30, item_ids: str | None = None):
+    try:
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
+        from src.llm_wiki_bridge import build_topic_synthesis_candidates
+
+        selected_item_ids = [part.strip() for part in (item_ids or "").split(",") if part.strip()]
+        execution = execute_sync_action(
+            intent="build_topic_synthesis",
+            task_kind="build_topic_synthesis",
+            context={"limit": limit, "item_ids": selected_item_ids},
+            artifact_type="topic_synthesis_candidates",
+            action=lambda execution_ctx: build_topic_synthesis_candidates(
+                limit=limit,
+                item_ids=selected_item_ids,
+                trace={
+                    "run_id": execution_ctx["run_id"],
+                    "task_id": execution_ctx["task_id"],
+                },
+            ).__dict__,
+            summarize=lambda payload: f"主题综合候选：生成 {payload['synthesis']} 条",
+            build_review=lambda payload: build_review_packet(
+                kind="topic_synthesis_review",
+                run_id="",
+                task_id="",
+                reason="主题综合候选已生成，等待人工批准后写入 llm_wiki",
+                candidate_payload=payload,
+                suggested_action="review_topic_synthesis_candidates",
+            ) if payload.get("synthesis") else None,
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"build_topic_synthesis 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"生成主题综合候选失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成主题综合候选失败：{e}")
+
+
+@app.post("/api/wiki/apply-reviewed-knowledge")
+def apply_reviewed_wiki_knowledge(card_ids: str | None = None, topic_ids: str | None = None):
+    try:
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.llm_wiki_bridge import apply_reviewed_knowledge_candidates
+
+        selected_card_ids = [part.strip() for part in (card_ids or "").split(",") if part.strip()]
+        selected_topic_ids = [part.strip() for part in (topic_ids or "").split(",") if part.strip()]
+        execution = execute_sync_action(
+            intent="apply_knowledge",
+            task_kind="apply_reviewed_knowledge",
+            context={"card_ids": selected_card_ids, "topic_ids": selected_topic_ids},
+            artifact_type="knowledge_apply",
+            action=lambda execution_ctx: apply_reviewed_knowledge_candidates(
+                card_ids=selected_card_ids,
+                topic_ids=selected_topic_ids,
+                trace={
+                    "run_id": execution_ctx["run_id"],
+                    "task_id": execution_ctx["task_id"],
+                },
+            ),
+            summarize=lambda payload: f"知识入库：写入 cards {payload['written_cards']} 条，topics {payload['written_topics']} 条，未写入 {len(payload['rejected_ids']['cards']) + len(payload['rejected_ids']['topics'])} 项",
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"apply_knowledge 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"知识入库失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"知识入库失败：{e}")
+
+
+@app.post("/api/generation/build-briefs")
+def build_generation_briefs_api(limit: int = 10, projected_action: str | None = None, knowledge_card_ids: str | None = None):
+    try:
+        from src.content_loop import build_generation_briefs
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
+
+        selected_knowledge_card_ids = [part.strip() for part in (knowledge_card_ids or "").split(",") if part.strip()]
+        execution = execute_sync_action(
+            intent="build_briefs",
+            task_kind="build_generation_briefs",
+            context={"limit": limit, "projected_action": projected_action or "", "knowledge_card_ids": selected_knowledge_card_ids},
+            artifact_type="generation_briefs",
+            action=lambda execution_ctx: build_generation_briefs(limit=limit, projected_action=projected_action or None, knowledge_card_ids=selected_knowledge_card_ids, trace={
+                "run_id": execution_ctx["run_id"],
+                "task_id": execution_ctx["task_id"],
+            }).__dict__,
+            summarize=lambda payload: f"生成 brief：创建 {payload['created']} 条，候选总数 {payload['total_candidates']} 条",
+            build_review=lambda payload: build_review_packet(
+                kind="generation_briefs_review",
+                run_id="",
+                task_id="",
+                reason="已生成 brief 候选，等待人工批准后进入草稿生成",
+                candidate_payload=payload,
+                suggested_action="review_generation_briefs",
+            ) if payload.get("created") else None,
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"build_briefs 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"生成 brief 失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成 brief 失败：{e}")
+
+
+@app.post("/api/generation/build-draft")
+def build_generation_draft_api(brief_id: str):
+    brief = brief_id.strip()
+    if not brief:
+        raise HTTPException(status_code=400, detail="brief_id 不能为空")
+    try:
+        from src.content_loop import build_draft_from_brief
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
+
+        execution = execute_sync_action(
+            intent="build_draft",
+            task_kind="build_draft",
+            context={"brief_id": brief},
+            artifact_type="draft",
+            action=lambda execution_ctx: build_draft_from_brief(brief, trace={
+                "run_id": execution_ctx["run_id"],
+                "task_id": execution_ctx["task_id"],
+            }).__dict__,
+            summarize=lambda payload: f"生成草稿：{payload['draft_id']}",
+            build_review=lambda payload: build_review_packet(
+                kind="draft_review",
+                run_id="",
+                task_id="",
+                reason="草稿已生成，等待人工确认后继续修订或发布",
+                candidate_payload=payload,
+                suggested_action="review_draft",
+            ) if payload.get("draft_id") and payload.get("review_required", True) else None,
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"build_draft 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        message = str(e)
+        status_code = 500
+        if "不存在" in message:
+            status_code = 404
+        elif "尚未批准" in message:
+            status_code = 409
+        raise HTTPException(status_code=status_code, detail=f"生成草稿失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成草稿失败：{e}")
+
+
+
+@app.post("/api/generation/build-geo")
+def build_geo_variants_api(draft_id: str):
+    draft = draft_id.strip()
+    if not draft:
+        raise HTTPException(status_code=400, detail="draft_id 不能为空")
+    try:
+        from src.content_loop import build_geo_variants
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
+
+        execution = execute_sync_action(
+            intent="build_geo",
+            task_kind="build_geo",
+            context={"draft_id": draft},
+            artifact_type="geo_variant",
+            action=lambda execution_ctx: build_geo_variants(draft, trace={
+                "run_id": execution_ctx["run_id"],
+                "task_id": execution_ctx["task_id"],
+            }).__dict__,
+            summarize=lambda payload: f"生成 GEO 变体：{payload['geo_id']}",
+            build_review=lambda payload: build_review_packet(
+                kind="geo_review",
+                run_id="",
+                task_id="",
+                reason="GEO 变体已生成，等待人工确认后再进入后续分发或发布",
+                candidate_payload=payload,
+                suggested_action="review_geo_variants",
+            ) if payload.get("geo_id") and payload.get("review_required", True) else None,
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"build_geo 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        message = str(e)
+        status_code = 500
+        if "不存在" in message:
+            status_code = 404
+        elif "尚未批准" in message:
+            status_code = 409
+        raise HTTPException(status_code=status_code, detail=f"生成 GEO 变体失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成 GEO 变体失败：{e}")
+
+
+@app.get("/api/wiki/knowledge-candidates")
+def list_wiki_knowledge_candidates():
+    from src.llm_wiki_bridge import list_knowledge_candidates
+
+    return list_knowledge_candidates()
+
+
+@app.get("/api/generation/briefs")
+def list_generation_briefs_api():
+    from src.content_loop import list_generation_briefs
+
+    return list_generation_briefs()
+
+
+@app.get("/api/generation/drafts")
+def list_generation_drafts_api():
+    from src.content_loop import list_drafts
+
+    return list_drafts()
+
+
+@app.get("/api/generation/geo")
+def list_generation_geo_api():
+    from src.content_loop import list_geo_variants
+
+    return list_geo_variants()
 
 
 @app.get("/api/content-loop/items")
@@ -1060,17 +1382,33 @@ def content_loop_tagging(body: TaggingRequest):
     """按本地标签词表给 content_items.jsonl 批量打标签，并生成 topic_tags.jsonl。"""
     try:
         from src.content_loop import apply_tags_to_content_items
+        from src.execution import ExecutionActionError, execute_sync_action
 
-        result = apply_tags_to_content_items(
-            taxonomy_path=Path(body.taxonomy_path) if body.taxonomy_path else None,
+        execution = execute_sync_action(
+            intent="tagging",
+            task_kind="tagging",
+            context={"taxonomy_path": body.taxonomy_path or ""},
+            artifact_type="taxonomy_result",
+            action=lambda: apply_tags_to_content_items(
+                taxonomy_path=Path(body.taxonomy_path) if body.taxonomy_path else None,
+            ).__dict__,
+            summarize=lambda payload: f"内容池打标签：{payload['tagged']}/{payload['total']} 条已覆盖",
         )
-        payload = result.__dict__
+        payload = execution["result"]
         _append_log(
             LOG_TAGGING_RUN,
             f"内容池打标签：{payload['tagged']}/{payload['total']} 条已覆盖",
-            payload,
+            {**payload, "run_id": execution['run']['run_id']},
         )
-        return payload
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"tagging 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"内容打标签失败：{e}（run {e.run_id}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"内容打标签失败：{e}")
 
@@ -1092,22 +1430,54 @@ def content_loop_ai_enrich(body: AIEnrichRequest):
         raise HTTPException(status_code=400, detail="max_chars 必须 >= 500")
     try:
         from src.content_loop import ai_enrich_content_items
+        from src.execution import ExecutionActionError, execute_sync_action
+        from src.execution.review import build_review_packet
 
-        result = ai_enrich_content_items(
-            limit=body.limit,
-            only_missing=body.only_missing,
-            source_type=body.source_type,
-            tag=body.tag,
-            item_ids=body.item_ids,
-            max_chars=body.max_chars,
+        execution = execute_sync_action(
+            intent="ai_enrich",
+            task_kind="ai_enrich",
+            context={
+                "limit": body.limit,
+                "only_missing": body.only_missing,
+                "source_type": body.source_type or "",
+                "tag": body.tag or "",
+                "item_ids": body.item_ids or [],
+                "max_chars": body.max_chars,
+            },
+            artifact_type="ai_result",
+            action=lambda: ai_enrich_content_items(
+                limit=body.limit,
+                only_missing=body.only_missing,
+                source_type=body.source_type,
+                tag=body.tag,
+                item_ids=body.item_ids,
+                max_chars=body.max_chars,
+            ).__dict__,
+            summarize=lambda payload: f"AI 分类总结：处理 {payload['processed']} 条，失败 {payload['failed']} 条",
+            build_review=lambda payload: build_review_packet(
+                kind="ai_enrich_review",
+                run_id="",
+                task_id="",
+                reason="AI 富化存在失败条目，需要人工决定是否重试或跳过",
+                candidate_payload={"errors": payload.get("errors", []), "failed": payload.get("failed", 0)},
+                suggested_action="review_ai_failures",
+            ) if payload.get("failed") else None,
         )
-        payload = result.__dict__
+        payload = execution["result"]
         _append_log(
             LOG_AI_ENRICH,
             f"AI 分类总结：处理 {payload['processed']} 条，失败 {payload['failed']} 条",
-            {k: v for k, v in payload.items() if k != "errors"},
+            {k: v for k, v in {**payload, "run_id": execution['run']['run_id']}.items() if k != "errors"},
         )
-        return payload
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"ai_enrich 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"AI 分类总结失败：{e}（run {e.run_id}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 分类总结失败：{e}")
 
@@ -1121,14 +1491,31 @@ def content_loop_sync_wechat():
     """
     try:
         from src.content_loop import sync_wechat_content_items
+        from src.execution import ExecutionActionError, execute_sync_action
 
-        result = sync_wechat_content_items()
+        execution = execute_sync_action(
+            intent="sync_wechat",
+            task_kind="sync_wechat",
+            context={"source_type": "wechat_article"},
+            artifact_type="content_delta",
+            action=sync_wechat_content_items,
+            summarize=lambda payload: f"同步公众号内容池：标准化 {payload['normalized']} 条，当前总计 {payload['total']} 条",
+        )
+        result = execution["result"]
         _append_log(
             LOG_CONTENT_SYNC,
             f"同步公众号内容池：标准化 {result['normalized']} 条，当前总计 {result['total']} 条",
-            result,
+            {**result, "run_id": execution['run']['run_id']},
         )
-        return result
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"sync_wechat 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"同步内容池失败：{e}（run {e.run_id}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步内容池失败：{e}")
 
@@ -1138,19 +1525,41 @@ def content_loop_sync_external(body: ExternalSyncRequest):
     """按 data/external_sources.json 中启用的连接器同步外部信源，并写入 content_items。"""
     try:
         from src.content_loop import sync_external_sources
+        from src.execution import ExecutionActionError, execute_sync_action
 
-        result = sync_external_sources(
-            config_path=Path(body.config_path) if body.config_path else None,
-            export_root=Path(body.export_root) if body.export_root else None,
-            use_example=body.use_example,
-            source_ids=body.source_ids,
+        execution = execute_sync_action(
+            intent="sync_external",
+            task_kind="sync_external",
+            context={
+                "config_path": body.config_path or "",
+                "export_root": body.export_root or "",
+                "use_example": body.use_example,
+                "source_ids": body.source_ids or [],
+            },
+            artifact_type="content_delta",
+            action=lambda: sync_external_sources(
+                config_path=Path(body.config_path) if body.config_path else None,
+                export_root=Path(body.export_root) if body.export_root else None,
+                use_example=body.use_example,
+                source_ids=body.source_ids,
+            ),
+            summarize=lambda payload: f"同步外部信源：{payload['items_synced']} 条内容，{len(payload['errors'])} 个错误",
         )
+        result = execution["result"]
         _append_log(
             LOG_EXTERNAL_SYNC,
             f"同步外部信源：{result['items_synced']} 条内容，{len(result['errors'])} 个错误",
-            result,
+            {**result, "run_id": execution['run']['run_id']},
         )
-        return result
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"sync_external 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}（run {e.run_id}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
 
@@ -1191,6 +1600,47 @@ def sync_unified_source(source_id: str):
         return {"source_id": source_key, "source_type": "external_source", "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"同步外部信源失败：{e}")
+
+
+
+@app.get("/api/content-loop/feedback-projection")
+def content_loop_feedback_projection():
+    from src.content_loop import summarize_feedback_projection
+
+    return summarize_feedback_projection()
+
+
+@app.post("/api/content-loop/feedback-projection")
+def rebuild_content_loop_feedback_projection():
+    try:
+        from src.content_loop import build_feedback_projection
+        from src.execution import ExecutionActionError, execute_sync_action
+
+        execution = execute_sync_action(
+            intent="feedback_projection",
+            task_kind="feedback_projection",
+            context={},
+            artifact_type="feedback_projection",
+            action=build_feedback_projection,
+            summarize=lambda payload: f"反馈投影：生成 {payload['projected_items']} 条策略规则",
+        )
+        payload = execution["result"]
+        _append_log(
+            LOG_FEEDBACK_EVENT,
+            f"反馈投影已重建：{payload['projected_items']} 条规则",
+            {**payload, "run_id": execution['run']['run_id']},
+        )
+        _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"]})
+        return execution
+    except ExecutionActionError as e:
+        _append_log(
+            LOG_EXECUTION_RUN_FAILED,
+            f"feedback_projection 执行失败：{e}",
+            {"run_id": e.run_id, "failure_state": e.failure_state},
+        )
+        raise HTTPException(status_code=500, detail=f"反馈投影重建失败：{e}（run {e.run_id}）")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"反馈投影重建失败：{e}")
 
 
 @app.post("/api/content-loop/feedback")
@@ -1502,7 +1952,248 @@ def get_logs(limit: int = 200):
     return entries
 
 
-# ── 凭证状态查询 API ────────────────────────────────────────────────────────────
+@app.get("/api/execution/runs")
+def list_execution_runs(limit: int = 20):
+    from src.execution import list_runs
+
+    return list_runs(limit=limit)
+
+
+@app.get("/api/execution/review-packets")
+def list_open_execution_review_packets(limit: int = 100):
+    from src.execution import list_open_review_packets
+
+    return {
+        "review_packets": list_open_review_packets(limit=limit),
+    }
+
+
+@app.get("/api/execution/runs/latest")
+def get_latest_execution_run():
+    from src.execution import get_latest_run_detail
+
+    detail = get_latest_run_detail()
+    if detail is None:
+        return {"run": None, "tasks": [], "events": [], "review_packets": [], "artifacts": []}
+    return detail
+
+
+class ReviewPacketResolveRequest(BaseModel):
+    status: str
+    resolved_by: str = "local_user"
+    continue_after_resolve: bool = False
+
+
+@app.post("/api/execution/runs/{run_id}/review/{packet_id}")
+def resolve_execution_review_packet(run_id: str, packet_id: str, body: ReviewPacketResolveRequest):
+    from src.execution import ExecutionActionError, execute_sync_action, resolve_review_packet
+    from src.execution.models import ExecutionRun
+    from src.execution.review import build_review_packet
+    from src.execution.store import append_event as append_execution_event, now_local_iso as execution_now_local_iso, read_run as read_execution_run, write_run as write_execution_run
+    from src.llm_wiki_bridge import apply_reviewed_knowledge_candidates, update_knowledge_candidate_status
+    from src.content_loop import build_draft_from_brief, build_geo_variants, update_generation_status, update_geo_variant_status
+
+    status = body.status.strip() or "approved"
+    if status not in {"approved", "rejected", "edited"}:
+        raise HTTPException(status_code=400, detail="status 必须是 approved / rejected / edited")
+    should_defer_source_completion = status in {"approved", "edited"} and body.continue_after_resolve
+    result = resolve_review_packet(
+        run_id.strip(),
+        packet_id.strip(),
+        status=status,
+        resolved_by=body.resolved_by.strip() or "local_user",
+        finalize_run=not should_defer_source_completion,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="review packet 不存在")
+
+    kind = str(result.get("kind") or "")
+    payload = result.get("candidate_payload") if isinstance(result.get("candidate_payload"), dict) else {}
+    follow_up_result = None
+    follow_up_results: list[dict[str, object]] = []
+    follow_up_errors: list[dict[str, str]] = []
+
+    if kind in {"knowledge_candidates_review", "topic_synthesis_review"}:
+        card_ids = payload.get("candidate_card_ids") if isinstance(payload.get("candidate_card_ids"), list) else []
+        topic_ids = payload.get("candidate_topic_ids") if isinstance(payload.get("candidate_topic_ids"), list) else []
+        update_knowledge_candidate_status(status, card_ids=card_ids, topic_ids=topic_ids)
+        if status in {"approved", "edited"} and body.continue_after_resolve:
+            execution = execute_sync_action(
+                intent="apply_knowledge",
+                task_kind="apply_reviewed_knowledge",
+                context={"source_run_id": run_id, "packet_id": packet_id, "card_ids": card_ids, "topic_ids": topic_ids},
+                artifact_type="knowledge_apply",
+                action=lambda execution_ctx: apply_reviewed_knowledge_candidates(
+                    card_ids=card_ids,
+                    topic_ids=topic_ids,
+                    trace={
+                        "run_id": execution_ctx["run_id"],
+                        "task_id": execution_ctx["task_id"],
+                        "packet_id": packet_id,
+                    },
+                ),
+                summarize=lambda follow_payload: f"知识入库：写入 cards {follow_payload['written_cards']} 条，topics {follow_payload['written_topics']} 条，未写入 {len((follow_payload.get('rejected_ids') or {}).get('cards', [])) + len((follow_payload.get('rejected_ids') or {}).get('topics', []))} 项",
+                trigger="system",
+            )
+            _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"], "source_run_id": run_id})
+            follow_up_result = execution
+    elif kind == "generation_briefs_review":
+        brief_ids = payload.get("brief_ids") if isinstance(payload.get("brief_ids"), list) else []
+        normalized_brief_ids = [str(brief_id) for brief_id in brief_ids if str(brief_id)]
+        if normalized_brief_ids:
+            for brief_id in normalized_brief_ids:
+                update_generation_status("brief", brief_id, status, trace={"run_id": run_id, "task_id": str(result.get("task_id") or ""), "packet_id": packet_id})
+        else:
+            brief_id = str(payload.get("brief_id") or "")
+            if brief_id:
+                normalized_brief_ids = [brief_id]
+                update_generation_status("brief", brief_id, status, trace={"run_id": run_id, "task_id": str(result.get("task_id") or ""), "packet_id": packet_id})
+        if status in {"approved", "edited"} and body.continue_after_resolve:
+            for brief_id in normalized_brief_ids:
+                try:
+                    execution = execute_sync_action(
+                        intent="build_draft",
+                        task_kind="build_draft",
+                        context={"brief_id": brief_id, "source_run_id": run_id, "packet_id": packet_id},
+                        artifact_type="draft",
+                        action=lambda execution_ctx, brief_id=brief_id: build_draft_from_brief(brief_id, trace={
+                            "run_id": execution_ctx["run_id"],
+                            "task_id": execution_ctx["task_id"],
+                            "packet_id": packet_id,
+                        }).__dict__,
+                        summarize=lambda follow_payload: f"生成草稿：{follow_payload['draft_id']}",
+                        trigger="system",
+                        build_review=lambda follow_payload: build_review_packet(
+                            kind="draft_review",
+                            run_id="",
+                            task_id="",
+                            reason="草稿已生成，等待人工确认后继续修订或发布",
+                            candidate_payload=follow_payload,
+                            suggested_action="review_draft",
+                        ) if follow_payload.get("draft_id") else None,
+                    )
+                    _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"], "source_run_id": run_id})
+                    follow_up_results.append(execution)
+                except ExecutionActionError as e:
+                    follow_up_errors.append({"target_id": brief_id, "error": str(e)})
+            if follow_up_results:
+                follow_up_result = follow_up_results[0]
+    elif kind == "draft_review":
+        draft_id = str(payload.get("draft_id") or "")
+        if draft_id:
+            update_generation_status("draft", draft_id, status, trace={"run_id": run_id, "task_id": str(result.get("task_id") or ""), "packet_id": packet_id})
+        if status in {"approved", "edited"} and body.continue_after_resolve and draft_id:
+            execution = execute_sync_action(
+                intent="build_geo",
+                task_kind="build_geo",
+                context={"draft_id": draft_id, "source_run_id": run_id, "packet_id": packet_id},
+                artifact_type="geo_variant",
+                action=lambda execution_ctx: build_geo_variants(draft_id, trace={
+                    "run_id": execution_ctx["run_id"],
+                    "task_id": execution_ctx["task_id"],
+                    "packet_id": packet_id,
+                }).__dict__,
+                summarize=lambda follow_payload: f"生成 GEO 变体：{follow_payload['geo_id']}",
+                trigger="system",
+                build_review=lambda follow_payload: build_review_packet(
+                    kind="geo_review",
+                    run_id="",
+                    task_id="",
+                    reason="GEO 变体已生成，等待人工确认后再进入后续分发或发布",
+                    candidate_payload=follow_payload,
+                    suggested_action="review_geo_variants",
+                ) if follow_payload.get("geo_id") else None,
+            )
+            _append_execution_outcome(execution["run"], execution["run"]["summary"], {"task_id": execution["task"]["task_id"], "source_run_id": run_id})
+            follow_up_result = execution
+    elif kind == "geo_review":
+        draft_id = str(payload.get("draft_id") or "")
+        if draft_id:
+            update_geo_variant_status(draft_id, status, trace={"run_id": run_id, "task_id": str(result.get("task_id") or ""), "packet_id": packet_id})
+
+    _append_log(
+        LOG_FEEDBACK_EVENT,
+        f"处理人工闸门：{packet_id} -> {status}",
+        {"run_id": run_id, "packet_id": packet_id, "status": status, "resolved_by": body.resolved_by, "continue_after_resolve": body.continue_after_resolve},
+    )
+
+    source_run_after_follow_up = None
+    if should_defer_source_completion:
+        source_run_after_follow_up = read_execution_run(run_id)
+        if source_run_after_follow_up:
+            occurred_at = execution_now_local_iso()
+            base_summary = str(source_run_after_follow_up.get("summary") or "人工闸门已处理")
+            if follow_up_errors:
+                degraded_message = f"{base_summary}（续跑失败 {len(follow_up_errors)} 项）"
+                source_run_after_follow_up["status"] = "degraded"
+                source_run_after_follow_up["finished_at"] = occurred_at
+                source_run_after_follow_up["summary"] = degraded_message
+                source_run_after_follow_up["failure_state"] = {
+                    "scope": "run",
+                    "stage": "follow_up",
+                    "code": "partial_follow_up_failure",
+                    "message": degraded_message,
+                    "retryable": True,
+                    "degraded": True,
+                    "action_required": "",
+                    "action_hint": "查看 follow_up_errors 并按需重试",
+                    "provider": "",
+                    "provider_trace": [],
+                    "verify_type": "",
+                    "verify_uuid": "",
+                    "occurred_at": occurred_at,
+                }
+                write_execution_run(ExecutionRun(**source_run_after_follow_up))
+                append_execution_event(
+                    run_id,
+                    "run_degraded",
+                    degraded_message,
+                    {"packet_id": packet_id, "follow_up_errors": follow_up_errors},
+                )
+                _append_execution_outcome(
+                    source_run_after_follow_up,
+                    degraded_message,
+                    {"packet_id": packet_id, "follow_up_errors": follow_up_errors},
+                )
+            else:
+                source_run_after_follow_up["status"] = "completed"
+                source_run_after_follow_up["finished_at"] = occurred_at
+                source_run_after_follow_up["summary"] = base_summary
+                source_run_after_follow_up["failure_state"] = None
+                write_execution_run(ExecutionRun(**source_run_after_follow_up))
+                append_execution_event(
+                    run_id,
+                    "run_completed",
+                    base_summary,
+                    {
+                        "packet_id": packet_id,
+                        "follow_up_results": len(follow_up_results) or (1 if follow_up_result is not None else 0),
+                    },
+                )
+                _append_execution_outcome(
+                    source_run_after_follow_up,
+                    base_summary,
+                    {
+                        "packet_id": packet_id,
+                        "follow_up_results": len(follow_up_results) or (1 if follow_up_result is not None else 0),
+                    },
+                )
+
+    run_after_resolution = source_run_after_follow_up or read_execution_run(run_id)
+    if run_after_resolution and str(run_after_resolution.get("status") or "") == "rejected":
+        _append_execution_outcome(
+            run_after_resolution,
+            str(run_after_resolution.get("summary") or f"人工闸门拒绝：{packet_id}"),
+            {"packet_id": packet_id, "resolved_by": body.resolved_by},
+        )
+    if follow_up_result is not None:
+        if follow_up_results or follow_up_errors:
+            return {**result, "follow_up_result": follow_up_result, "follow_up_results": follow_up_results, "follow_up_errors": follow_up_errors}
+        return {**result, "follow_up_result": follow_up_result}
+    if follow_up_errors:
+        return {**result, "follow_up_errors": follow_up_errors}
+    return result
+
 
 class AuthStatus(BaseModel):
     """凭证状态的完整信息，供前端状态横幅展示。"""

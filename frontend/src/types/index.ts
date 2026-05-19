@@ -1,93 +1,71 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // 全局 TypeScript 类型定义
-// 所有页面和组件共用的数据结构都在这里声明，保持类型一致性。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── 文章数据（对应 message_info.json 中每篇博客的结构） ──────────────────────
 export interface Article {
-  id: string           // 唯一 ID：格式为 "{msgid}-{aid}-{create_time}"
-  title: string        // 文章标题
-  digest: string       // 文章摘要（微信原始摘要）
-  link: string         // 微信原文链接（点击后跳转）
-  cover: string        // 封面图原始 URL（微信 CDN，可能有防盗链）
-  create_time: string  // 发布时间，格式 "YYYY-MM-DD HH:MM"
-  is_deleted: boolean  // 是否已被公众号删除
-  item_show_type: number  // 文章展示类型（0=普通图文，5=视频 等，非 0 一般跳过）
-
-  // 预留 LLM 字段，目前为空，后续接入大模型打标签/摘要时填充
-  tags?: string[]      // LLM 生成的标签列表
-  summary?: string     // LLM 生成的文章摘要（比 digest 更精炼）
+  id: string
+  title: string
+  digest: string
+  link: string
+  cover: string
+  create_time: string
+  is_deleted: boolean
+  item_show_type: number
+  tags?: string[]
+  summary?: string
 }
 
-// ── 单个公众号的文章集合（message_info.json 中每个 key 对应的 value） ────────
 export interface AccountData {
-  latest_update_time: string  // 最后一次成功爬取的时间
-  blogs: Article[]            // 该公众号的所有文章列表
+  latest_update_time: string
+  blogs: Article[]
 }
 
-// message_info.json 的完整结构：{ "公众号名称": AccountData, ... }
 export type MessageInfo = Record<string, AccountData>
-
-// name2fakeid.json 的结构：{ "公众号名称": "fakeid字符串", ... }
 export type Name2FakeId = Record<string, string>
 
-// ── 公众号信息（前端展示用，合并了 name2fakeid 和 message_info 的数据） ──────
 export interface AccountInfo {
-  name: string               // 公众号名称
-  fakeid: string             // 微信内部 ID
-  latest_update_time: string // 最后爬取时间
-  article_count: number      // 当前有效文章数
-  visible: boolean           // 是否在文章流中显示（可通过配置隐藏）
+  name: string
+  fakeid: string
+  latest_update_time: string
+  article_count: number
+  visible: boolean
 }
 
-// ── 筛选/排序/分组相关类型 ────────────────────────────────────────────────────
+export type SortOrder = 'newest' | 'oldest'
+export type GroupBy = 'date' | 'account' | 'none'
+export type ReadFilter = 'all' | 'unread' | 'bookmarked'
 
-// 文章排序方式
-export type SortOrder = 'newest' | 'oldest'  // 最新优先 / 最早优先
-
-// 文章分组方式
-export type GroupBy = 'date' | 'account' | 'none'  // 按日期 / 按公众号 / 不分组
-
-// 已读/收藏筛选
-export type ReadFilter = 'all' | 'unread' | 'bookmarked'  // 全部 / 未读 / 已收藏
-
-// FilterBar 组件管理的所有筛选条件
 export interface FilterState {
-  keyword: string        // 关键词搜索（匹配标题、摘要、AI 摘要）
-  accounts: string[]     // 只显示选中公众号的文章（空数组=显示全部）
-  tags: string[]         // 标签过滤（需同时含有所有选中标签）
-  dateFrom: string       // 日期范围起始（格式 "YYYY-MM-DD"）
-  dateTo: string         // 日期范围结束（格式 "YYYY-MM-DD"）
-  sortOrder: SortOrder   // 排序方式
-  groupBy: GroupBy       // 分组方式
-  readFilter: ReadFilter // 已读状态筛选
-  excludeAds: boolean    // 是否默认过滤带有“广告”标签的文章
-  semanticSearch: boolean // 是否启用语义搜索排序
+  keyword: string
+  accounts: string[]
+  tags: string[]
+  dateFrom: string
+  dateTo: string
+  sortOrder: SortOrder
+  groupBy: GroupBy
+  readFilter: ReadFilter
+  excludeAds: boolean
+  semanticSearch: boolean
 }
 
-// ── 导出格式 ───────────────────────────────────────────────────────────────────
 export type ExportFormat = 'markdown' | 'csv' | 'json'
 
-// ── API 响应类型（与后端 api.py 中的 Pydantic 模型对应） ─────────────────────
-
-// GET /api/auth/status 和 POST /api/auth/check 的响应
 export interface AuthStatus {
-  has_credentials: boolean  // id_info.json 中是否有 token 和 cookie
-  valid: boolean            // 上次检测凭证是否有效
-  checked_at: string        // 上次检测时间
-  error: string             // 失败原因（正常时为空）
-  token_hint: string        // token 前 8 位，供确认身份
-  id_info_mtime: string     // id_info.json 最后修改时间
+  has_credentials: boolean
+  valid: boolean
+  checked_at: string
+  error: string
+  token_hint: string
+  id_info_mtime: string
 }
 
-// GET /api/cache/preview 的响应（清理前预览）
 export interface CachePreview {
-  keep_days: number            // 保留天数
-  cutoff_date: string          // 截止日期
-  total_articles: number       // 当前文章总数
-  removable_articles: number   // 将删除的文章数
-  removable_covers: number     // 将删除的封面图数
-  removable_detail_texts: number // 将删除的详情缓存数
+  keep_days: number
+  cutoff_date: string
+  total_articles: number
+  removable_articles: number
+  removable_covers: number
+  removable_detail_texts: number
 }
 
 export interface CoverRefillPreview {
@@ -110,20 +88,18 @@ export interface CrawlScheduleStatus {
   last_message: string
 }
 
-// GET /api/crawl/status 的响应（爬取进度，前端轮询）
 export interface CrawlStatus {
-  running: boolean      // 是否正在爬取
-  total: number         // 本次需爬取的公众号总数
-  done: number          // 已完成的公众号数
-  current: string       // 正在爬取的公众号名称
-  errors: string[]      // 本次爬取错误列表
-  started_at: string    // 开始时间
-  finished_at: string   // 结束时间（未结束时为空）
-  new_articles: number  // 本次新增文章数
-  auth_error: boolean   // 是否因凭证失效而终止
+  running: boolean
+  total: number
+  done: number
+  current: string
+  errors: string[]
+  started_at: string
+  finished_at: string
+  new_articles: number
+  auth_error: boolean
 }
 
-// POST /api/wiki/export-sources 的响应
 export interface WikiExportResult {
   export_root: string
   raw_sources_dir: string
@@ -132,10 +108,268 @@ export interface WikiExportResult {
   accounts: number
 }
 
-// ── 内容闭环：ContentItem / 外部源 / 标签 / AI 富化 ───────────────────────────
+export interface KnowledgeApplyIds {
+  cards: string[]
+  topics: string[]
+}
+
+export interface KnowledgeApplyReasons {
+  cards: Record<string, string>
+  topics: Record<string, string>
+}
+
+export interface KnowledgeApplyResult {
+  export_root: string
+  written_cards: number
+  written_topics: number
+  cards_index_file: string
+  topics_index_file: string
+  requested_ids: KnowledgeApplyIds
+  accepted_ids: KnowledgeApplyIds
+  rejected_ids: KnowledgeApplyIds
+  rejected_reasons?: KnowledgeApplyReasons
+}
+
+export interface ExecutionFailureState {
+  scope: string
+  stage: string
+  code: string
+  message: string
+  retryable: boolean
+  degraded: boolean
+  action_required: string
+  action_hint: string
+  provider: string
+  provider_trace: Array<Record<string, unknown>>
+  verify_type: string
+  verify_uuid: string
+  occurred_at: string
+}
+
+export interface ExecutionTask {
+  task_id: string
+  run_id: string
+  kind: string
+  status: string
+  depends_on: string[]
+  attempt: number
+  input_ref: Record<string, unknown>
+  output_ref: Record<string, unknown>
+  provider_trace_ref: Record<string, unknown>
+  started_at: string
+  finished_at: string
+  failure_state?: ExecutionFailureState | null
+}
+
+export interface ExecutionArtifact {
+  artifact_id: string
+  run_id: string
+  task_id: string
+  type: string
+  path: string
+  checksum: string
+  created_at: string
+  meta: Record<string, unknown>
+}
+
+export interface ExecutionReviewFollowUpError {
+  target_id: string
+  error: string
+}
+
+export interface ExecutionReviewResolveResponse {
+  packet_id: string
+  run_id: string
+  task_id: string
+  kind: string
+  reason: string
+  candidate_payload: Record<string, unknown>
+  suggested_action: string
+  status: string
+  resolved_at: string
+  resolved_by: string
+  follow_up_result?: ExecutionActionResponse<Record<string, unknown> | KnowledgeApplyResult>
+  follow_up_results?: Array<ExecutionActionResponse<Record<string, unknown> | KnowledgeApplyResult>>
+  follow_up_errors?: ExecutionReviewFollowUpError[]
+}
+
+export interface ExecutionReviewPacket {
+  packet_id: string
+  run_id: string
+  task_id: string
+  kind: string
+  reason: string
+  candidate_payload: Record<string, unknown>
+  suggested_action: string
+  status: string
+  resolved_at: string
+  resolved_by: string
+}
+
+export interface ExecutionRun {
+  run_id: string
+  intent: string
+  status: string
+  trigger: string
+  started_at: string
+  finished_at: string
+  summary: string
+  context: Record<string, unknown>
+  current_task: string
+  failure_state?: ExecutionFailureState | null
+}
+
+export interface OpenExecutionReviewPacket extends ExecutionReviewPacket {
+  run_intent: string
+  run_status: string
+  run_summary: string
+  started_at: string
+  preview?: {
+    label: string
+    summary: string
+    items?: string[]
+    details?: Record<string, unknown>
+  }
+  follow_up?: {
+    action: string
+    target_id?: string
+    target_ids?: string[]
+    count?: number
+    label: string
+  }
+}
+
+
+
+export interface OpenExecutionReviewPacketResponse {
+  review_packets: OpenExecutionReviewPacket[]
+}
+
+export interface ExecutionRunDetail {
+  run: ExecutionRun | null
+  tasks: ExecutionTask[]
+  events: Array<{
+    timestamp: string
+    type: string
+    message: string
+    details: Record<string, unknown>
+  }>
+  review_packets: ExecutionReviewPacket[]
+  artifacts: ExecutionArtifact[]
+}
+
+export interface ExecutionActionResponse<T> {
+  run: ExecutionRun
+  task: ExecutionTask
+  artifact: ExecutionArtifact
+  failure_state: ExecutionFailureState | null
+  review_packet?: ExecutionReviewPacket | null
+  result: T
+}
+
+export interface FeedbackProjectionRule {
+  scope: string
+  key: string
+  total_feedback: number
+  priority_delta?: number
+  dominant_decision: string
+  decision_counts: Record<string, number>
+  strategy_hint?: string
+}
+
+export interface FeedbackProjectionReason {
+  scope: string
+  key: string
+  priority_delta: number
+  dominant_decision: string
+  total_feedback: number
+  strategy_hint?: string
+}
+
+export interface ProjectedActionInfo {
+  projected_action?: string
+  projected_action_label?: string
+  projected_action_reason?: string
+  projected_action_scope?: string
+}
+
+export interface FeedbackProjectionBlockedReasonEntry {
+  reason: string
+  count: number
+}
+
+export interface FeedbackProjectionRecommendedAction {
+  action: string
+  action_key?: string
+  label: string
+  count: number
+  top_score: number
+  score_range: {
+    min: number
+    max: number
+  }
+  actionable: boolean
+  execution_kind: string
+  execution_label: string
+  execution_blocked_reason: string
+  precondition_statuses: string[]
+  precondition_passed: boolean
+  ready_count: number
+  blocked_count: number
+  blocked_item_ids: string[]
+  blocked_reason_by_item: Record<string, string>
+  blocked_reason_breakdown: FeedbackProjectionBlockedReasonEntry[]
+  blocked_sample_titles: string[]
+  pending_approval_label?: string
+  pending_approval_count: number
+  pending_approval_item_ids: string[]
+  missing_candidate_item_ids: string[]
+  pending_approval_card_ids: string[]
+  pending_approval_packet_ids: string[]
+  pending_approval_sample_titles: string[]
+  missing_candidate_count: number
+  missing_candidate_sample_titles: string[]
+  fallback_actionable: boolean
+  fallback_execution_kind: string
+  fallback_execution_label: string
+  fallback_execution_params: Record<string, unknown>
+  execution_params: Record<string, unknown>
+  item_ids: string[]
+  sample_titles: string[]
+  sample_ids: string[]
+}
+
+export interface FeedbackProjectionProjectedItem {
+  id: string
+  title: string
+  source_name: string
+  projected_score: number
+  feedback_projection_delta: number
+  projected_action: string
+  projected_action_label: string
+  projected_action_reason: string
+}
+
+export interface FeedbackProjectionSummary {
+  projection_file: string
+  rows: number
+  scope_counts: {
+    tag: number
+    source: number
+    action: number
+  }
+  updated_at: string
+  top_positive: FeedbackProjectionRule[]
+  top_negative: FeedbackProjectionRule[]
+  top_actions: FeedbackProjectionRule[]
+  recommended_actions: FeedbackProjectionRecommendedAction[]
+  top_projected_items: FeedbackProjectionProjectedItem[]
+}
+
 export interface ContentLoopOverview {
   content_items: number
   feedback_events: number
+  feedback_projection_rules?: number
   wechat_candidates: number
   external_sources: number
   enabled_external_sources: number
@@ -148,6 +382,7 @@ export interface ContentLoopOverview {
   auto_tag_counts: Record<string, number>
   content_items_file: string
   feedback_events_file: string
+  feedback_projection_file?: string
   source_config_file: string
   source_config_is_example: boolean
   last_content_pool_update: string
@@ -175,6 +410,13 @@ export interface ContentLoopItem {
   tag_scores?: Record<string, number>
   tag_evidence?: Record<string, string[]>
   score: number
+  projected_score?: number
+  feedback_projection_delta?: number
+  feedback_projection_reasons?: FeedbackProjectionReason[]
+  projected_action?: string
+  projected_action_label?: string
+  projected_action_reason?: string
+  projected_action_scope?: string
   status: string
   human_decision: string
   feedback_notes: string[]
@@ -294,6 +536,7 @@ export interface AIEnrichmentOverview {
   ai_errors: number
 }
 
+
 export interface AIEnrichmentResult {
   content_items_file: string
   total_candidates: number
@@ -305,4 +548,20 @@ export interface AIEnrichmentResult {
     item_id: string
     error: string
   }>
+}
+
+export interface GeoVariantResult {
+  geo_file: string
+  created: number
+  geo_id: string
+  draft_id: string
+}
+
+export interface GenerationTraceFields {
+  source_run_id?: string
+  source_task_id?: string
+  source_packet_id?: string
+  applied_run_id?: string
+  applied_task_id?: string
+  applied_packet_id?: string
 }

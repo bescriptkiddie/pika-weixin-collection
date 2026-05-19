@@ -9,6 +9,11 @@ frontend/dist/
 data/.DS_Store
 data/id_info.json
 data/operation_logs.jsonl
+data/runs/
 data/covers/
 data/markdown/
 data/markdown_current/*.zip
+
+.agents/
+.claude/
+skills-lock.json
