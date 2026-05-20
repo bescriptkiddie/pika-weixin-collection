@@ -677,7 +677,7 @@ def _fetch_bilibili_metadata(session: requests.Session, bvid: str) -> dict[str, 
     return data
 
 
-def _fetch_bilibili_subtitles(session: requests.Session, metadata: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str]:
+def _fetch_bilibili_subtitles(session: requests.Session, metadata: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str, str]:
     bvid = str(metadata.get("bvid") or "")
     cid = str(metadata.get("cid") or "")
     aid = str(metadata.get("aid") or "")
@@ -690,22 +690,75 @@ def _fetch_bilibili_subtitles(session: requests.Session, metadata: dict[str, Any
     subtitle = data.get("subtitle") if isinstance(data, dict) else {}
     subtitles = subtitle.get("subtitles") if isinstance(subtitle, dict) else []
     if not isinstance(subtitles, list) or not subtitles:
-        return "", [], ""
+        return "", [], "", ""
 
     first = next((item for item in subtitles if isinstance(item, dict) and item.get("subtitle_url")), None)
     if not first:
-        return "", [], ""
+        return "", [], "", ""
     subtitle_url = str(first["subtitle_url"])
     if subtitle_url.startswith("//"):
         subtitle_url = "https:" + subtitle_url
-    raw = json.loads(_get_text(session, subtitle_url, headers=_bilibili_headers(bvid)))
+    raw_text = _get_text(session, subtitle_url, headers=_bilibili_headers(bvid))
+    raw = json.loads(raw_text)
     body = raw.get("body") if isinstance(raw, dict) else []
     segments = [
         {"start": item.get("from", 0), "end": item.get("to", 0), "text": str(item.get("content") or "").strip()}
         for item in body
         if isinstance(item, dict) and str(item.get("content") or "").strip()
     ]
-    return "\n".join(segment["text"] for segment in segments), segments, subtitle_url
+    return "\n".join(segment["text"] for segment in segments), segments, subtitle_url, json.dumps(raw, ensure_ascii=False, indent=2)
+
+
+def _normalize_bilibili_xml_text(raw_xml: str) -> str:
+    if re.search(r"[\u4e00-\u9fff]", raw_xml):
+        return raw_xml
+    if not re.search(r"[ÃÂäåæçèéï]", raw_xml):
+        return raw_xml
+    try:
+        repaired = raw_xml.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        return raw_xml
+    return repaired if re.search(r"[\u4e00-\u9fff]", repaired) else raw_xml
+
+
+def _parse_bilibili_danmaku(raw_xml: str, *, bvid: str) -> tuple[str, list[dict[str, Any]]]:
+    raw_xml = _normalize_bilibili_xml_text(raw_xml)
+    try:
+        root = ET.fromstring(raw_xml)
+    except ET.ParseError as exc:
+        raise MediaSourceImportError(f"弹幕 XML 解析失败：{bvid} {exc}") from exc
+    segments: list[dict[str, Any]] = []
+    for node in root.findall("d"):
+        text = html.unescape(node.text or "").strip()
+        text = re.sub(r"[\r\n\u2028\u2029]+", " ", text)
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text).strip()
+        if not text:
+            continue
+        raw_start = (node.attrib.get("p") or "0").split(",", 1)[0]
+        try:
+            start = float(raw_start)
+        except ValueError:
+            start = 0.0
+        segments.append({"start": start, "end": start, "text": text})
+    segments.sort(key=lambda item: float(item.get("start") or 0))
+    return "\n".join(segment["text"] for segment in segments), segments
+
+
+def _fetch_bilibili_danmaku(session: requests.Session, metadata: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str, str]:
+    bvid = str(metadata.get("bvid") or "")
+    cid = str(metadata.get("cid") or "")
+    if not cid:
+        return "", [], "", ""
+    danmaku_url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={cid}"
+    response = session.get(
+        danmaku_url,
+        headers={**_bilibili_headers(bvid), "Accept": "application/xml,text/xml,*/*"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    raw_xml = response.content.decode("utf-8", errors="replace")
+    danmaku_text, segments = _parse_bilibili_danmaku(raw_xml, bvid=bvid)
+    return danmaku_text, segments, danmaku_url, raw_xml
 
 
 def _download_bilibili_audio(session: requests.Session, metadata: dict[str, Any]) -> Path:
@@ -770,6 +823,48 @@ def _write_media_raw_snapshot(
     dest = source_dir / f"{title}.md"
     dest.write_text(_media_raw_markdown(item, source), encoding="utf-8")
     return str(dest.relative_to(export_root))
+
+
+def _write_bilibili_text_resource(
+    source: dict[str, Any],
+    *,
+    title: str,
+    bvid: str,
+    suffix: str,
+    content: str,
+    export_root: Path,
+) -> str:
+    dest = _bilibili_text_resource_path(source, title=title, bvid=bvid, suffix=suffix, export_root=export_root)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(content, encoding="utf-8")
+    return str(dest.relative_to(export_root))
+
+
+def _bilibili_text_resource_path(
+    source: dict[str, Any],
+    *,
+    title: str,
+    bvid: str,
+    suffix: str,
+    export_root: Path,
+) -> Path:
+    source_dir = export_root / RAW_BILIBILI_ROOT / safe_slug(source["id"], "source") / "subtitles"
+    filename = f"{safe_slug(f'{title}-{bvid}', 'subtitle', 96)}{suffix}"
+    return source_dir / filename
+
+
+def _read_bilibili_text_resource(
+    source: dict[str, Any],
+    *,
+    title: str,
+    bvid: str,
+    suffix: str,
+    export_root: Path,
+) -> tuple[str, str]:
+    dest = _bilibili_text_resource_path(source, title=title, bvid=bvid, suffix=suffix, export_root=export_root)
+    if not dest.exists():
+        return "", ""
+    return str(dest.relative_to(export_root)), dest.read_text(encoding="utf-8")
 
 
 def _build_media_item(
@@ -839,11 +934,28 @@ def sync_bilibili_video_source(
     published_at = _timestamp_to_iso(metadata.get("pubdate"))
     video_url = f"https://www.bilibili.com/video/{bvid}/"
 
-    transcript, segments, subtitle_url = _fetch_bilibili_subtitles(session, metadata)
+    export_root_path = Path(export_root)
+    download_subtitles = bool(options.get("download_subtitles", True))
+    transcript, segments, subtitle_url, raw_subtitle_text = _fetch_bilibili_subtitles(session, metadata)
     transcript_source = "official_subtitle" if transcript else ""
     asr_result: dict[str, Any] | None = None
     audio_path = ""
+    raw_subtitle_file = ""
+    danmaku_text = ""
+    danmaku_segments: list[dict[str, Any]] = []
+    danmaku_url = ""
+    danmaku_file = ""
     errors: list[str] = []
+
+    if raw_subtitle_text and download_subtitles:
+        raw_subtitle_file = _write_bilibili_text_resource(
+            source,
+            title=title,
+            bvid=bvid,
+            suffix=".subtitle.json",
+            content=raw_subtitle_text,
+            export_root=export_root_path,
+        )
 
     if not transcript and bool(options.get("transcribe", True)):
         try:
@@ -856,19 +968,66 @@ def sync_bilibili_video_source(
         except Exception as exc:  # noqa: BLE001 - keep source result visible
             errors.append(f"ASR 转写失败：{exc}")
 
+    if not transcript and download_subtitles:
+        try:
+            danmaku_file, raw_danmaku_xml = _read_bilibili_text_resource(
+                source,
+                title=title,
+                bvid=bvid,
+                suffix=".danmaku.xml",
+                export_root=export_root_path,
+            )
+            if raw_danmaku_xml:
+                normalized_danmaku_xml = _normalize_bilibili_xml_text(raw_danmaku_xml)
+                if normalized_danmaku_xml != raw_danmaku_xml:
+                    raw_danmaku_xml = normalized_danmaku_xml
+                    danmaku_file = _write_bilibili_text_resource(
+                        source,
+                        title=title,
+                        bvid=bvid,
+                        suffix=".danmaku.xml",
+                        content=raw_danmaku_xml,
+                        export_root=export_root_path,
+                    )
+                danmaku_text, danmaku_segments = _parse_bilibili_danmaku(raw_danmaku_xml, bvid=bvid)
+                danmaku_url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={metadata.get('cid') or ''}"
+            else:
+                danmaku_text, danmaku_segments, danmaku_url, raw_danmaku_xml = _fetch_bilibili_danmaku(session, metadata)
+                danmaku_file = _write_bilibili_text_resource(
+                    source,
+                    title=title,
+                    bvid=bvid,
+                    suffix=".danmaku.xml",
+                    content=raw_danmaku_xml,
+                    export_root=export_root_path,
+                )
+        except Exception as exc:  # noqa: BLE001 - keep source result visible
+            errors.append(f"弹幕资源下载失败：{exc}")
+
+    text_source_label = transcript_source or ("danmaku" if danmaku_text else "")
     content_parts = [
         f"# {title}",
         "",
         f"- UP主：{owner.get('name') or ''}",
         f"- 发布时间：{published_at}",
         f"- 视频链接：{video_url}",
-        f"- 文本来源：{transcript_source or '未取得字幕/转写'}",
+        f"- 文本来源：{text_source_label or '未取得字幕/转写'}",
         "",
     ]
+    if raw_subtitle_file:
+        content_parts.extend([f"- 字幕资源：{raw_subtitle_file}"])
+    if danmaku_file:
+        content_parts.extend([f"- 弹幕资源：{danmaku_file}"])
+    if raw_subtitle_file or danmaku_file:
+        content_parts.append("")
     if transcript:
         content_parts.extend(["## 转写文本", "", transcript, ""])
-    if segments:
+    if transcript and segments:
         content_parts.extend(["## 时间线文本", "", _format_segments(segments), ""])
+    if not transcript and danmaku_text:
+        content_parts.extend(["## 弹幕文本（非口播字幕）", "", danmaku_text, ""])
+    if not transcript and danmaku_segments:
+        content_parts.extend(["## 弹幕时间线", "", _format_segments(danmaku_segments), ""])
     if metadata.get("desc"):
         content_parts.extend(["## 简介", "", str(metadata.get("desc") or "").strip(), ""])
     content_markdown = "\n".join(content_parts).strip()
@@ -892,13 +1051,22 @@ def sync_bilibili_video_source(
             "cover": metadata.get("pic") or "",
             "subtitle_url": subtitle_url,
             "transcript_source": transcript_source,
+            "raw_subtitle_file": raw_subtitle_file,
+            "danmaku_url": danmaku_url,
+            "danmaku_file": danmaku_file,
+            "danmaku_count": len(danmaku_segments),
+            "subtitle_resource_type": "official_subtitle" if raw_subtitle_file else ("danmaku" if danmaku_file else ""),
             "asr": {k: v for k, v in (asr_result or {}).items() if k not in {"segments", "text"}},
             "audio_path": audio_path,
         },
     )
+    if raw_subtitle_file:
+        item["references"].append({"type": "subtitle_resource", "path": raw_subtitle_file})
+    if danmaku_file:
+        item["references"].append({"type": "danmaku_resource", "path": danmaku_file})
     raw_source_file = ""
     if bool(options.get("snapshot_raw_sources", False)):
-        raw_source_file = _write_media_raw_snapshot(source, item, Path(export_root), RAW_BILIBILI_ROOT)
+        raw_source_file = _write_media_raw_snapshot(source, item, export_root_path, RAW_BILIBILI_ROOT)
         item["references"].append({"type": "source_snapshot", "path": raw_source_file})
         item["metadata"]["raw_source_file"] = raw_source_file
 

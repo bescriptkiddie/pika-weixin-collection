@@ -4,6 +4,8 @@ from unittest.mock import Mock, patch
 from src.content_loop.media_sources import (
     MediaSourceImportError,
     extract_bilibili_mid,
+    _normalize_bilibili_xml_text,
+    _parse_bilibili_danmaku,
     list_bilibili_space_videos,
     sync_bilibili_space_source,
 )
@@ -28,7 +30,19 @@ class BilibiliSpaceConfigTests(unittest.TestCase):
         self.assertEqual(source["type"], "bilibili_space")
         self.assertEqual(source["name"], "米来哆哆")
         self.assertFalse(source["options"]["transcribe"])
+        self.assertTrue(source["options"]["download_subtitles"])
         self.assertEqual(source["options"]["max_items"], 100)
+
+    def test_parse_bilibili_danmaku_repairs_cached_mojibake(self):
+        raw_xml = '<?xml version="1.0" encoding="UTF-8"?><i><d p="1.5,1,25,16777215,0,0,hash,id,0">两种可能性</d></i>'
+        mojibake = raw_xml.encode("utf-8").decode("latin-1")
+
+        repaired = _normalize_bilibili_xml_text(mojibake)
+        text, segments = _parse_bilibili_danmaku(mojibake, bvid="BV1test")
+
+        self.assertIn("两种可能性", repaired)
+        self.assertEqual(text, "两种可能性")
+        self.assertEqual(segments[0]["start"], 1.5)
 
 
 class BilibiliSpaceSyncTests(unittest.TestCase):

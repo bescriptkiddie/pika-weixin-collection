@@ -99,6 +99,7 @@ def _bilibili_source(
         "human_reason": human_reason.strip() or "B 站视频转成可读文本，进入统一内容池做摘要、标签和复盘。",
         "options": {
             "transcribe": transcribe,
+            "download_subtitles": True,
             "asr_provider": "xiaomi_omni",
             "asr_model": "mimo-v2-omni",
             "max_completion_tokens": 12000,
@@ -131,6 +132,7 @@ def _bilibili_space_source(
         "options": {
             "max_items": 100,
             "transcribe": transcribe,
+            "download_subtitles": True,
             "asr_provider": "xiaomi_omni",
             "asr_model": "mimo-v2-omni",
             "max_completion_tokens": 12000,
