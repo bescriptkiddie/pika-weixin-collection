@@ -100,6 +100,8 @@ def _bilibili_source(
         "options": {
             "transcribe": transcribe,
             "download_subtitles": True,
+            "write_transcript_markdown": True,
+            "download_danmaku": False,
             "asr_provider": "xiaomi_omni",
             "asr_model": "mimo-v2-omni",
             "max_completion_tokens": 12000,
@@ -133,6 +135,8 @@ def _bilibili_space_source(
             "max_items": 100,
             "transcribe": transcribe,
             "download_subtitles": True,
+            "write_transcript_markdown": True,
+            "download_danmaku": False,
             "asr_provider": "xiaomi_omni",
             "asr_model": "mimo-v2-omni",
             "max_completion_tokens": 12000,

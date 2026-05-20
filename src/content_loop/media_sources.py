@@ -1090,6 +1090,72 @@ def _read_bilibili_text_resource(
     return str(dest.relative_to(export_root)), dest.read_text(encoding="utf-8")
 
 
+def _format_bilibili_transcript_markdown(
+    *,
+    title: str,
+    owner_name: str,
+    published_at: str,
+    video_url: str,
+    bvid: str,
+    aid: Any,
+    cid: Any,
+    duration: Any,
+    transcript: str,
+    segments: list[dict[str, Any]],
+    transcript_source: str,
+    subtitle_url: str,
+    raw_subtitle_file: str,
+    description: str,
+    transcribe_enabled: bool,
+) -> tuple[str, str]:
+    source_label = transcript_source or "pending_transcription"
+    if transcript_source == "official_subtitle":
+        status = "已取得 B 站官方字幕。"
+    elif transcript:
+        status = "已通过 ASR 生成口播转写。"
+    elif transcribe_enabled:
+        status = "未取得 B 站官方字幕，ASR 转写未成功生成文本。"
+    else:
+        status = "未取得 B 站官方字幕；当前信源未启用 ASR 转写。"
+
+    parts = [
+        f"# {title}",
+        "",
+        f"- UP主：{owner_name}",
+        f"- 发布时间：{published_at}",
+        f"- 视频链接：{video_url}",
+        f"- BVID：{bvid}",
+        f"- AID：{aid or ''}",
+        f"- CID：{cid or ''}",
+        f"- 时长：{duration or ''} 秒",
+        f"- 文本来源：{source_label}",
+        f"- 状态：{status}",
+        "- 说明：本文档不包含弹幕内容。",
+    ]
+    if subtitle_url:
+        parts.append(f"- 官方字幕 URL：{subtitle_url}")
+    if raw_subtitle_file:
+        parts.append(f"- 官方字幕原始文件：{raw_subtitle_file}")
+    parts.append("")
+
+    if transcript:
+        parts.extend(["## 转写文本", "", transcript, ""])
+    else:
+        parts.extend(
+            [
+                "## 转写文本",
+                "",
+                "> 暂无口播转写文本。需要启用 ASR 或取得官方字幕后生成。",
+                "",
+            ]
+        )
+    if segments:
+        parts.extend(["## 时间线文本", "", _format_segments(segments), ""])
+    if description.strip():
+        parts.extend(["## 简介", "", description.strip(), ""])
+    return "\n".join(parts).strip() + "\n", source_label
+
+
 def _build_media_item(
     *,
     item_id: str,
@@ -1159,12 +1225,17 @@ def sync_bilibili_video_source(
 
     export_root_path = Path(export_root)
     download_subtitles = bool(options.get("download_subtitles", True))
+    write_transcript_markdown = bool(options.get("write_transcript_markdown", True))
+    download_danmaku = bool(options.get("download_danmaku", False))
     refresh_danmaku = bool(options.get("refresh_danmaku", False))
     transcript, segments, subtitle_url, raw_subtitle_text = _fetch_bilibili_subtitles(session, metadata)
     transcript_source = "official_subtitle" if transcript else ""
+    transcribe_enabled = bool(options.get("transcribe", True))
     asr_result: dict[str, Any] | None = None
     audio_path = ""
     raw_subtitle_file = ""
+    transcript_markdown_file = ""
+    transcript_resource_type = ""
     danmaku_text = ""
     danmaku_segments: list[dict[str, Any]] = []
     danmaku_url = ""
@@ -1182,7 +1253,7 @@ def sync_bilibili_video_source(
             export_root=export_root_path,
         )
 
-    if not transcript and bool(options.get("transcribe", True)):
+    if not transcript and transcribe_enabled:
         try:
             audio = _download_bilibili_audio(session, metadata)
             audio_path = str(audio)
@@ -1193,7 +1264,34 @@ def sync_bilibili_video_source(
         except Exception as exc:  # noqa: BLE001 - keep source result visible
             errors.append(f"ASR 转写失败：{exc}")
 
-    if not transcript and download_subtitles:
+    if write_transcript_markdown:
+        transcript_markdown, transcript_resource_type = _format_bilibili_transcript_markdown(
+            title=title,
+            owner_name=str(owner.get("name") or ""),
+            published_at=published_at,
+            video_url=video_url,
+            bvid=bvid,
+            aid=metadata.get("aid"),
+            cid=metadata.get("cid"),
+            duration=metadata.get("duration"),
+            transcript=transcript,
+            segments=segments,
+            transcript_source=transcript_source,
+            subtitle_url=subtitle_url,
+            raw_subtitle_file=raw_subtitle_file,
+            description=str(metadata.get("desc") or ""),
+            transcribe_enabled=transcribe_enabled,
+        )
+        transcript_markdown_file = _write_bilibili_text_resource(
+            source,
+            title=title,
+            bvid=bvid,
+            suffix=".transcript.md",
+            content=transcript_markdown,
+            export_root=export_root_path,
+        )
+
+    if not transcript and download_subtitles and download_danmaku:
         try:
             danmaku_file, raw_danmaku_xml = _read_bilibili_text_resource(
                 source,
@@ -1239,7 +1337,7 @@ def sync_bilibili_video_source(
         except Exception as exc:  # noqa: BLE001 - keep source result visible
             errors.append(f"弹幕资源下载失败：{exc}")
 
-    text_source_label = transcript_source or ("danmaku" if danmaku_text else "")
+    text_source_label = transcript_source or ("pending_transcription" if transcript_markdown_file else "")
     content_parts = [
         f"# {title}",
         "",
@@ -1251,14 +1349,18 @@ def sync_bilibili_video_source(
     ]
     if raw_subtitle_file:
         content_parts.extend([f"- 字幕资源：{raw_subtitle_file}"])
+    if transcript_markdown_file:
+        content_parts.extend([f"- Markdown 文本资源：{transcript_markdown_file}"])
     if danmaku_file:
         content_parts.extend([f"- 弹幕资源：{danmaku_file}"])
-    if raw_subtitle_file or danmaku_file:
+    if raw_subtitle_file or transcript_markdown_file or danmaku_file:
         content_parts.append("")
     if transcript:
         content_parts.extend(["## 转写文本", "", transcript, ""])
     if transcript and segments:
         content_parts.extend(["## 时间线文本", "", _format_segments(segments), ""])
+    if not transcript and not danmaku_text:
+        content_parts.extend(["## 转写文本", "", "> 暂无口播转写文本。需要启用 ASR 或取得官方字幕后生成。", ""])
     if not transcript and danmaku_text:
         content_parts.extend(["## 弹幕文本（非口播字幕）", "", danmaku_text, ""])
     if not transcript and danmaku_segments:
@@ -1287,18 +1389,29 @@ def sync_bilibili_video_source(
             "subtitle_url": subtitle_url,
             "transcript_source": transcript_source,
             "raw_subtitle_file": raw_subtitle_file,
+            "transcript_markdown_file": transcript_markdown_file,
+            "transcript_resource_type": transcript_resource_type,
             "danmaku_url": danmaku_url,
             "danmaku_file": danmaku_file,
             "danmaku_count": len(danmaku_segments),
             "danmaku_fetch_mode": danmaku_fetch_mode,
-            "danmaku_resource_scope": "public_bilibili_danmaku",
-            "subtitle_resource_type": "official_subtitle" if raw_subtitle_file else ("danmaku" if danmaku_file else ""),
+            "danmaku_resource_scope": "public_bilibili_danmaku" if danmaku_file else "",
+            "subtitle_resource_type": (
+                "official_subtitle"
+                if raw_subtitle_file
+                else ("transcript_markdown" if transcript_markdown_file else ("danmaku" if danmaku_file else ""))
+            ),
             "asr": {k: v for k, v in (asr_result or {}).items() if k not in {"segments", "text"}},
             "audio_path": audio_path,
         },
     )
+    if not danmaku_file:
+        for key in ("danmaku_url", "danmaku_file", "danmaku_count", "danmaku_fetch_mode", "danmaku_resource_scope"):
+            item["metadata"].pop(key, None)
     if raw_subtitle_file:
         item["references"].append({"type": "subtitle_resource", "path": raw_subtitle_file})
+    if transcript_markdown_file:
+        item["references"].append({"type": "transcript_markdown", "path": transcript_markdown_file})
     if danmaku_file:
         item["references"].append({"type": "danmaku_resource", "path": danmaku_file})
     raw_source_file = ""

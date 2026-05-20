@@ -6,8 +6,8 @@ source_name: "米来哆哆"
 title: "放量下跌 洗盘or见顶？"
 url: "https://www.bilibili.com/video/BV1E8596pE94/"
 published_at: "2026-05-14T18:05:21+08:00"
-fetched_at: "2026-05-20T09:14:50+08:00"
-metadata: {"bvid": "BV1E8596pE94", "aid": 116572341409521, "cid": 38328732297, "duration": 586, "cover": "http://i1.hdslb.com/bfs/archive/4cfeff2aec4eb99710286f269831ef54c991d1cf.jpg", "subtitle_url": "", "transcript_source": "", "raw_subtitle_file": "", "danmaku_url": "https://api.bilibili.com/x/v1/dm/list.so?oid=38328732297", "danmaku_file": "raw/sources/bilibili/bilibili-space-3546669224298959/subtitles/放量下跌-洗盘or见顶？-BV1E8596pE94.danmaku.xml", "danmaku_count": 27, "danmaku_fetch_mode": "cache_public_list_plus_web_segments", "danmaku_resource_scope": "public_bilibili_danmaku", "subtitle_resource_type": "danmaku", "asr": {}, "audio_path": "", "origin": "bilibili_video", "connector_type": "bilibili_video", "source_config_id": "bilibili-space-3546669224298959", "human_reason": "批量抓取米来哆哆 B 站空间的视频，先进入统一内容池做摘要、标签和后续转写复盘。"}
+fetched_at: "2026-05-20T09:34:55+08:00"
+metadata: {"bvid": "BV1E8596pE94", "aid": 116572341409521, "cid": 38328732297, "duration": 586, "cover": "http://i1.hdslb.com/bfs/archive/4cfeff2aec4eb99710286f269831ef54c991d1cf.jpg", "subtitle_url": "", "transcript_source": "", "raw_subtitle_file": "", "transcript_markdown_file": "raw/sources/bilibili/bilibili-space-3546669224298959/subtitles/放量下跌-洗盘or见顶？-BV1E8596pE94.transcript.md", "transcript_resource_type": "pending_transcription", "subtitle_resource_type": "transcript_markdown", "asr": {}, "audio_path": "", "origin": "bilibili_video", "connector_type": "bilibili_video", "source_config_id": "bilibili-space-3546669224298959", "human_reason": "批量抓取米来哆哆 B 站空间的视频，先进入统一内容池做摘要、标签和后续转写复盘。"}
 sources: []
 ---
 
@@ -15,11 +15,11 @@ sources: []
 
 - 来源：B站 / 米来哆哆
 - URL：https://www.bilibili.com/video/BV1E8596pE94/
-- 抓取时间：2026-05-20T09:14:50+08:00
+- 抓取时间：2026-05-20T09:34:55+08:00
 
 ## 摘要
 
-# 放量下跌 洗盘or见顶？ - UP主：米来哆哆 - 发布时间：2026-05-14T18:05:21+08:00 - 视频链接：https://www.bilibili.com/video/BV1E8596pE94/ - 文本来源：danmaku - 弹幕资源：raw/sources/bilibili/bilibili-space-3546669224...
+# 放量下跌 洗盘or见顶？ - UP主：米来哆哆 - 发布时间：2026-05-14T18:05:21+08:00 - 视频链接：https://www.bilibili.com/video/BV1E8596pE94/ - 文本来源：pending_transcription - Markdown 文本资源：raw/sources/bilibili/bi...
 
 ## 文本
 
@@ -28,66 +28,10 @@ sources: []
 - UP主：米来哆哆
 - 发布时间：2026-05-14T18:05:21+08:00
 - 视频链接：https://www.bilibili.com/video/BV1E8596pE94/
-- 文本来源：danmaku
+- 文本来源：pending_transcription
 
-- 弹幕资源：raw/sources/bilibili/bilibili-space-3546669224298959/subtitles/放量下跌-洗盘or见顶？-BV1E8596pE94.danmaku.xml
+- Markdown 文本资源：raw/sources/bilibili/bilibili-space-3546669224298959/subtitles/放量下跌-洗盘or见顶？-BV1E8596pE94.transcript.md
 
-## 弹幕文本（非口播字幕）
+## 转写文本
 
-今天没多多挣钱....
-这个量还谈不上见顶吧
-跌跌跌丝了
-有啊
-怎么没有
-使劲回调，为后续上涨做准备！
-有恐慌啊，高位见顶断头铡还是挺吓人的
-明天补跌
-尾盘还不恐慌么
-明天涨涨涨
-还抄底？？
-低开上翘，然后继续杀
-低开高走
-我觉得上午稍微拉一拉，然后继续杀
-啊？
-板块涨的时候没涨，跌的时候没少
-是的，我看见一些评论深深觉得自己进步了
-短期行情应该是见顶了，你看中证500跌成那样，不光是科技跌了已经，全面跌
-满仓踏空
-我预言6月19日左右大盘见顶 跌到10月底
-今天吃了两个涨停，都让我亏了2个点
-老乡们掩护
-老乡别走
-明天补张
-路边假新闻
-挖空的山里
-锂矿太容易受小作文影响，所以一直走得不好看
-
-## 弹幕时间线
-
-[0001.98-0001.98] 今天没多多挣钱....
-[0003.98-0003.98] 这个量还谈不上见顶吧
-[0006.58-0006.58] 跌跌跌丝了
-[0022.11-0022.11] 有啊
-[0027.37-0027.37] 怎么没有
-[0029.94-0029.94] 使劲回调，为后续上涨做准备！
-[0032.04-0032.04] 有恐慌啊，高位见顶断头铡还是挺吓人的
-[0032.26-0032.26] 明天补跌
-[0032.56-0032.56] 尾盘还不恐慌么
-[0038.52-0038.52] 明天涨涨涨
-[0076.94-0076.94] 还抄底？？
-[0100.00-0100.00] 低开上翘，然后继续杀
-[0105.98-0105.98] 低开高走
-[0125.96-0125.96] 我觉得上午稍微拉一拉，然后继续杀
-[0129.54-0129.54] 啊？
-[0136.87-0136.87] 板块涨的时候没涨，跌的时候没少
-[0139.57-0139.57] 是的，我看见一些评论深深觉得自己进步了
-[0147.87-0147.87] 短期行情应该是见顶了，你看中证500跌成那样，不光是科技跌了已经，全面跌
-[0152.18-0152.18] 满仓踏空
-[0156.51-0156.51] 我预言6月19日左右大盘见顶 跌到10月底
-[0167.38-0167.38] 今天吃了两个涨停，都让我亏了2个点
-[0356.16-0356.16] 老乡们掩护
-[0368.19-0368.19] 老乡别走
-[0402.65-0402.65] 明天补张
-[0421.10-0421.10] 路边假新闻
-[0489.33-0489.33] 挖空的山里
-[0516.03-0516.03] 锂矿太容易受小作文影响，所以一直走得不好看
+> 暂无口播转写文本。需要启用 ASR 或取得官方字幕后生成。

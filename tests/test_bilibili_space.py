@@ -5,6 +5,7 @@ from src.content_loop.media_sources import (
     MediaSourceImportError,
     _decode_bilibili_danmaku_segments,
     _format_bilibili_danmaku_xml,
+    _format_bilibili_transcript_markdown,
     extract_bilibili_mid,
     _normalize_bilibili_xml_text,
     _parse_bilibili_danmaku,
@@ -33,6 +34,8 @@ class BilibiliSpaceConfigTests(unittest.TestCase):
         self.assertEqual(source["name"], "米来哆哆")
         self.assertFalse(source["options"]["transcribe"])
         self.assertTrue(source["options"]["download_subtitles"])
+        self.assertTrue(source["options"]["write_transcript_markdown"])
+        self.assertFalse(source["options"]["download_danmaku"])
         self.assertEqual(source["options"]["max_items"], 100)
 
     def test_parse_bilibili_danmaku_repairs_cached_mojibake(self):
@@ -85,6 +88,30 @@ class BilibiliSpaceConfigTests(unittest.TestCase):
         self.assertEqual(segments[0]["start"], 12.345)
         self.assertIn("<source>public-list.so+web-seg.so</source>", xml)
         self.assertIn("完整分段弹幕", xml)
+
+    def test_format_transcript_markdown_excludes_danmaku(self):
+        markdown, source = _format_bilibili_transcript_markdown(
+            title="测试视频",
+            owner_name="米来哆哆",
+            published_at="2026-05-20T12:00:00+08:00",
+            video_url="https://www.bilibili.com/video/BV1test/",
+            bvid="BV1test",
+            aid=123,
+            cid=456,
+            duration=789,
+            transcript="",
+            segments=[],
+            transcript_source="",
+            subtitle_url="",
+            raw_subtitle_file="",
+            description="视频简介",
+            transcribe_enabled=False,
+        )
+
+        self.assertEqual(source, "pending_transcription")
+        self.assertIn("本文档不包含弹幕内容", markdown)
+        self.assertIn("暂无口播转写文本", markdown)
+        self.assertNotIn("弹幕文本", markdown)
 
 
 class BilibiliSpaceSyncTests(unittest.TestCase):
