@@ -325,7 +325,11 @@ def transcribe_audio_file(audio_path: str | Path, options: dict[str, Any] | None
 
 
 def _bilibili_headers(bvid: str) -> dict[str, str]:
-    return {"Referer": f"https://www.bilibili.com/video/{bvid}/", "Origin": "https://www.bilibili.com"}
+    headers = {"Referer": f"https://www.bilibili.com/video/{bvid}/", "Origin": "https://www.bilibili.com"}
+    cookie = _bilibili_cookie_header()
+    if cookie:
+        headers["Cookie"] = cookie
+    return headers
 
 
 def _bilibili_space_headers(mid: str) -> dict[str, str]:
@@ -681,14 +685,29 @@ def _fetch_bilibili_subtitles(session: requests.Session, metadata: dict[str, Any
     bvid = str(metadata.get("bvid") or "")
     cid = str(metadata.get("cid") or "")
     aid = str(metadata.get("aid") or "")
-    payload = _get_json(
-        session,
-        f"https://api.bilibili.com/x/player/v2?aid={aid}&cid={cid}",
-        headers=_bilibili_headers(bvid),
-    )
-    data = payload.get("data") if isinstance(payload, dict) else {}
-    subtitle = data.get("subtitle") if isinstance(data, dict) else {}
-    subtitles = subtitle.get("subtitles") if isinstance(subtitle, dict) else []
+
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    if aid and cid:
+        candidates.append(("https://api.bilibili.com/x/player/v2", {"aid": aid, "cid": cid}))
+    if bvid and cid:
+        candidates.append(("https://api.bilibili.com/x/player/v2", {"bvid": bvid, "cid": cid}))
+    if aid and cid:
+        candidates.append(("https://api.bilibili.com/x/player/wbi/v2", {"aid": aid, "cid": cid}))
+    if bvid and cid:
+        candidates.append(("https://api.bilibili.com/x/player/wbi/v2", {"bvid": bvid, "cid": cid}))
+
+    subtitles: list[Any] = []
+    for endpoint, params in candidates:
+        try:
+            payload = _fetch_bilibili_api(session, endpoint, params=params, headers=_bilibili_headers(bvid))
+        except (requests.RequestException, ValueError, MediaSourceImportError):
+            continue
+        data = payload.get("data") if isinstance(payload, dict) else {}
+        subtitle = data.get("subtitle") if isinstance(data, dict) else {}
+        subtitles = subtitle.get("subtitles") if isinstance(subtitle, dict) else []
+        if isinstance(subtitles, list) and subtitles:
+            break
+
     if not isinstance(subtitles, list) or not subtitles:
         return "", [], "", ""
 

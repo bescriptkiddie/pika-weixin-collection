@@ -1,9 +1,12 @@
+import json
 import unittest
 from unittest.mock import Mock, patch
 
 from src.content_loop.media_sources import (
     MediaSourceImportError,
+    _bilibili_headers,
     _decode_bilibili_danmaku_segments,
+    _fetch_bilibili_subtitles,
     _format_bilibili_danmaku_xml,
     _format_bilibili_transcript_markdown,
     extract_bilibili_mid,
@@ -112,6 +115,45 @@ class BilibiliSpaceConfigTests(unittest.TestCase):
         self.assertIn("本文档不包含弹幕内容", markdown)
         self.assertIn("暂无口播转写文本", markdown)
         self.assertNotIn("弹幕文本", markdown)
+
+    def test_bilibili_video_headers_include_cookie(self):
+        with patch("src.content_loop.media_sources._bilibili_cookie_header", return_value="SESSDATA=test"):
+            headers = _bilibili_headers("BV1test")
+
+        self.assertEqual(headers["Cookie"], "SESSDATA=test")
+        self.assertEqual(headers["Referer"], "https://www.bilibili.com/video/BV1test/")
+
+    def test_fetch_subtitles_retries_player_variants(self):
+        subtitle_payload = {
+            "data": {
+                "subtitle": {
+                    "subtitles": [
+                        {"subtitle_url": "//example.com/subtitle.json"},
+                    ]
+                }
+            }
+        }
+        raw_subtitle = {"body": [{"from": 1.2, "to": 2.4, "content": "真实字幕"}]}
+
+        with patch(
+            "src.content_loop.media_sources._fetch_bilibili_api",
+            side_effect=[{"data": {"subtitle": {"subtitles": []}}}, subtitle_payload],
+        ) as fetch_api, patch(
+            "src.content_loop.media_sources._get_text",
+            return_value=json.dumps(raw_subtitle, ensure_ascii=False),
+        ) as get_text:
+            transcript, segments, subtitle_url, raw_text = _fetch_bilibili_subtitles(
+                Mock(),
+                {"bvid": "BV1test", "aid": 123, "cid": 456},
+            )
+
+        self.assertEqual(fetch_api.call_count, 2)
+        self.assertEqual(fetch_api.call_args_list[0].kwargs["params"], {"aid": "123", "cid": "456"})
+        self.assertEqual(fetch_api.call_args_list[1].kwargs["params"], {"bvid": "BV1test", "cid": "456"})
+        self.assertEqual(get_text.call_args.args[1], "https://example.com/subtitle.json")
+        self.assertEqual(transcript, "真实字幕")
+        self.assertEqual(segments[0]["start"], 1.2)
+        self.assertIn("真实字幕", raw_text)
 
 
 class BilibiliSpaceSyncTests(unittest.TestCase):
