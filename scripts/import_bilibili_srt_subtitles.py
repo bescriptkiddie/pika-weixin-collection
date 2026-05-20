@@ -123,23 +123,23 @@ def ensure_reference(item: dict[str, Any], reference: dict[str, str]) -> None:
     references.insert(insert_at, reference)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--subtitle-dir", default="/tmp/pika-bilibili-subs")
-    parser.add_argument("--source-id", default=DEFAULT_SOURCE_ID)
-    args = parser.parse_args()
-
-    subtitle_dir = Path(args.subtitle_dir)
+def import_bilibili_srt_subtitles(
+    subtitle_dir: str | Path = "/tmp/pika-bilibili-subs",
+    *,
+    source_id: str = DEFAULT_SOURCE_ID,
+    refresh_raw_sources: bool = False,
+) -> dict[str, Any]:
+    subtitle_dir = Path(subtitle_dir)
     source_config = next(
         source
         for source in read_json(DATA_DIR / "external_sources.json", {}).get("sources", [])
-        if source.get("id") == args.source_id
+        if source.get("id") == source_id
     )
     items = read_jsonl(DATA_DIR / "content_items.jsonl")
     by_bvid = {
         item.get("metadata", {}).get("bvid"): item
         for item in items
-        if isinstance(item.get("metadata"), dict) and item.get("source_id") == args.source_id
+        if isinstance(item.get("metadata"), dict) and item.get("source_id") == source_id
     }
 
     imported = 0
@@ -189,11 +189,27 @@ def main() -> None:
         raw_source_rel = metadata.get("raw_source_file")
         if raw_source_rel:
             raw_source_path = EXPORT_ROOT / raw_source_rel
-            raw_source_path.write_text(_media_raw_markdown(item, source_config), encoding="utf-8")
+            if refresh_raw_sources or not raw_source_path.exists():
+                raw_source_path.write_text(_media_raw_markdown(item, source_config), encoding="utf-8")
         imported += 1
 
     write_jsonl(DATA_DIR / "content_items.jsonl", items)
-    print(json.dumps({"imported": imported, "missing": missing}, ensure_ascii=False, indent=2))
+    return {"imported": imported, "missing": missing}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--subtitle-dir", default="/tmp/pika-bilibili-subs")
+    parser.add_argument("--source-id", default=DEFAULT_SOURCE_ID)
+    parser.add_argument("--refresh-raw-sources", action="store_true")
+    args = parser.parse_args()
+
+    result = import_bilibili_srt_subtitles(
+        args.subtitle_dir,
+        source_id=args.source_id,
+        refresh_raw_sources=args.refresh_raw_sources,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

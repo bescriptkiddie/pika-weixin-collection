@@ -100,6 +100,16 @@ cd frontend && npm run dev
 - `/api/content-loop/feedback` 将人工判断写入 `data/feedback_events.jsonl`
 - `/api/content-loop/tagging` 和 `/api/content-loop/ai-enrich` 为内容池补充标签、AI 摘要与分类
 
+### B 站 AI 字幕导入
+
+登录 Chrome 中的 B 站账号后，可用一条命令抓取 `data/external_sources.json` 中 B 站空间配置的 AI 中文字幕，并自动导入为内容池 Markdown：
+
+```bash
+uv run python scripts/fetch_bilibili_ai_subtitles.py --source-id bilibili-space-3546669224298959 --cookies-from-browser chrome:Default
+```
+
+脚本只使用本机 Chrome 登录态调用 `yt-dlp` 获取 `ai-zh.srt`，不下载视频本体；导入后会更新 `data/content_items.jsonl`、字幕原始文件和 `.transcript.md`。
+
 ### 公众号数据链路
 
 - 支持按公众号 `fakeid` 批量拉取近一个月文章
