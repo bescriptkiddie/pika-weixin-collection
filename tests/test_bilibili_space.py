@@ -3,6 +3,8 @@ from unittest.mock import Mock, patch
 
 from src.content_loop.media_sources import (
     MediaSourceImportError,
+    _decode_bilibili_danmaku_segments,
+    _format_bilibili_danmaku_xml,
     extract_bilibili_mid,
     _normalize_bilibili_xml_text,
     _parse_bilibili_danmaku,
@@ -43,6 +45,46 @@ class BilibiliSpaceConfigTests(unittest.TestCase):
         self.assertIn("两种可能性", repaired)
         self.assertEqual(text, "两种可能性")
         self.assertEqual(segments[0]["start"], 1.5)
+
+    def test_decode_bilibili_segmented_danmaku_protobuf(self):
+        def varint(value: int) -> bytes:
+            output = bytearray()
+            while value >= 0x80:
+                output.append((value & 0x7F) | 0x80)
+                value >>= 7
+            output.append(value)
+            return bytes(output)
+
+        def field_varint(field: int, value: int) -> bytes:
+            return varint(field << 3) + varint(value)
+
+        def field_text(field: int, value: str) -> bytes:
+            data = value.encode("utf-8")
+            return varint((field << 3) | 2) + varint(len(data)) + data
+
+        elem = b"".join(
+            [
+                field_varint(1, 123456789),
+                field_varint(2, 12345),
+                field_varint(3, 1),
+                field_varint(4, 25),
+                field_varint(5, 16777215),
+                field_text(6, "abc123"),
+                field_text(7, "完整分段弹幕"),
+                field_varint(8, 1779193447),
+                field_varint(9, 10),
+                field_text(12, "123456789"),
+            ]
+        )
+        raw = varint((1 << 3) | 2) + varint(len(elem)) + elem
+
+        segments = _decode_bilibili_danmaku_segments(raw, bvid="BV1test")
+        xml = _format_bilibili_danmaku_xml({"cid": 42}, segments, source="public-list.so+web-seg.so")
+
+        self.assertEqual(segments[0]["text"], "完整分段弹幕")
+        self.assertEqual(segments[0]["start"], 12.345)
+        self.assertIn("<source>public-list.so+web-seg.so</source>", xml)
+        self.assertIn("完整分段弹幕", xml)
 
 
 class BilibiliSpaceSyncTests(unittest.TestCase):

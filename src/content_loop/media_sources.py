@@ -734,31 +734,254 @@ def _parse_bilibili_danmaku(raw_xml: str, *, bvid: str) -> tuple[str, list[dict[
         text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text).strip()
         if not text:
             continue
-        raw_start = (node.attrib.get("p") or "0").split(",", 1)[0]
+        p_fields = (node.attrib.get("p") or "0").split(",")
+        raw_start = p_fields[0]
         try:
             start = float(raw_start)
         except ValueError:
             start = 0.0
-        segments.append({"start": start, "end": start, "text": text})
+        segment: dict[str, Any] = {"start": start, "end": start, "text": text}
+        for key, index in {
+            "mode": 1,
+            "fontsize": 2,
+            "color": 3,
+            "ctime": 4,
+            "pool": 5,
+            "mid_hash": 6,
+            "id_str": 7,
+            "weight": 8,
+        }.items():
+            if len(p_fields) > index and p_fields[index] != "":
+                segment[key] = p_fields[index]
+        segments.append(segment)
     segments.sort(key=lambda item: float(item.get("start") or 0))
     return "\n".join(segment["text"] for segment in segments), segments
 
 
-def _fetch_bilibili_danmaku(session: requests.Session, metadata: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str, str]:
+def _read_bilibili_varint(data: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while offset < len(data):
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, offset
+        shift += 7
+        if shift > 70:
+            break
+    raise ValueError("invalid protobuf varint")
+
+
+def _skip_bilibili_wire_value(data: bytes, offset: int, wire_type: int) -> int:
+    if wire_type == 0:
+        _, offset = _read_bilibili_varint(data, offset)
+        return offset
+    if wire_type == 1:
+        return min(len(data), offset + 8)
+    if wire_type == 2:
+        length, offset = _read_bilibili_varint(data, offset)
+        return min(len(data), offset + length)
+    if wire_type == 5:
+        return min(len(data), offset + 4)
+    raise ValueError(f"unsupported protobuf wire type: {wire_type}")
+
+
+def _decode_bilibili_dm_element(data: bytes) -> dict[str, Any] | None:
+    offset = 0
+    item: dict[str, Any] = {}
+    while offset < len(data):
+        key, offset = _read_bilibili_varint(data, offset)
+        field = key >> 3
+        wire_type = key & 0x07
+        if wire_type == 0:
+            value, offset = _read_bilibili_varint(data, offset)
+            if field == 1:
+                item["id"] = value
+                item["id_str"] = str(value)
+            elif field == 2:
+                item["start"] = value / 1000
+                item["end"] = value / 1000
+            elif field == 3:
+                item["mode"] = value
+            elif field == 4:
+                item["fontsize"] = value
+            elif field == 5:
+                item["color"] = value
+            elif field == 8:
+                item["ctime"] = value
+            elif field == 9:
+                item["weight"] = value
+            elif field == 11:
+                item["pool"] = value
+            elif field == 13:
+                item["attr"] = value
+            elif field == 26:
+                item["cid"] = value
+            elif field == 27:
+                item["type"] = value
+        elif wire_type == 2:
+            length, offset = _read_bilibili_varint(data, offset)
+            value = data[offset : offset + length]
+            offset += length
+            text_value = value.decode("utf-8", errors="replace")
+            if field == 6:
+                item["mid_hash"] = text_value
+            elif field == 7:
+                text = html.unescape(text_value).strip()
+                text = re.sub(r"[\r\n\u2028\u2029]+", " ", text)
+                text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]+", "", text).strip()
+                item["text"] = text
+            elif field == 12:
+                item["id_str"] = text_value
+            elif field == 20:
+                item["animation"] = text_value
+        else:
+            offset = _skip_bilibili_wire_value(data, offset, wire_type)
+    return item if str(item.get("text") or "").strip() else None
+
+
+def _decode_bilibili_danmaku_segments(raw: bytes, *, bvid: str) -> list[dict[str, Any]]:
+    segments: list[dict[str, Any]] = []
+    offset = 0
+    try:
+        while offset < len(raw):
+            key, offset = _read_bilibili_varint(raw, offset)
+            field = key >> 3
+            wire_type = key & 0x07
+            if field == 1 and wire_type == 2:
+                length, offset = _read_bilibili_varint(raw, offset)
+                value = raw[offset : offset + length]
+                offset += length
+                item = _decode_bilibili_dm_element(value)
+                if item:
+                    segments.append(item)
+            else:
+                offset = _skip_bilibili_wire_value(raw, offset, wire_type)
+    except ValueError as exc:
+        raise MediaSourceImportError(f"弹幕 protobuf 解析失败：{bvid} {exc}") from exc
+    return segments
+
+
+def _bilibili_danmaku_dedupe_key(segment: dict[str, Any]) -> tuple[str, str, str]:
+    id_value = str(segment.get("id_str") or segment.get("id") or "").strip()
+    if id_value:
+        return ("id", id_value, "")
+    start = f"{float(segment.get('start') or 0):.3f}"
+    return ("text", start, str(segment.get("text") or "").strip())
+
+
+def _merge_bilibili_danmaku_segments(*segment_groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for segments in segment_groups:
+        for segment in segments:
+            text = str(segment.get("text") or "").strip()
+            if not text:
+                continue
+            key = _bilibili_danmaku_dedupe_key(segment)
+            if key not in merged:
+                merged[key] = {**segment, "text": text}
+    return sorted(merged.values(), key=lambda item: (float(item.get("start") or 0), str(item.get("id_str") or "")))
+
+
+def _format_bilibili_danmaku_xml(metadata: dict[str, Any], segments: list[dict[str, Any]], *, source: str) -> str:
+    cid = str(metadata.get("cid") or "")
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        "<i>",
+        "  <chatserver>chat.bilibili.com</chatserver>",
+        f"  <chatid>{html.escape(cid)}</chatid>",
+        "  <mission>0</mission>",
+        f"  <maxlimit>{len(segments)}</maxlimit>",
+        "  <state>0</state>",
+        "  <real_name>0</real_name>",
+        f"  <source>{html.escape(source)}</source>",
+    ]
+    for segment in segments:
+        start = float(segment.get("start") or 0)
+        mode = int(float(segment.get("mode") or 1))
+        fontsize = int(float(segment.get("fontsize") or 25))
+        color = int(float(segment.get("color") or 16777215))
+        ctime = int(float(segment.get("ctime") or 0))
+        pool = int(float(segment.get("pool") or 0))
+        mid_hash = str(segment.get("mid_hash") or "")
+        id_str = str(segment.get("id_str") or segment.get("id") or "")
+        weight = int(float(segment.get("weight") or 0))
+        p_value = f"{start:.5f},{mode},{fontsize},{color},{ctime},{pool},{mid_hash},{id_str},{weight}"
+        text = html.escape(str(segment.get("text") or ""), quote=False)
+        lines.append(f'  <d p="{html.escape(p_value, quote=True)}">{text}</d>')
+    lines.append("</i>")
+    return "\n".join(lines) + "\n"
+
+
+def _fetch_bilibili_segmented_danmaku(
+    session: requests.Session,
+    metadata: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    bvid = str(metadata.get("bvid") or "")
+    cid = str(metadata.get("cid") or "")
+    aid = str(metadata.get("aid") or "")
+    duration = int(float(metadata.get("duration") or 0))
+    if not cid or not aid or duration <= 0:
+        return [], [], []
+    segment_count = max(1, (duration + 359) // 360)
+    segments: list[dict[str, Any]] = []
+    urls: list[str] = []
+    errors: list[str] = []
+    for segment_index in range(1, segment_count + 1):
+        url = "https://api.bilibili.com/x/v2/dm/web/seg.so"
+        try:
+            response = session.get(
+                url,
+                params={"type": 1, "oid": cid, "pid": aid, "segment_index": segment_index},
+                headers={**_bilibili_headers(bvid), "Accept": "application/octet-stream,*/*"},
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            errors.append(f"segment {segment_index}: {exc}")
+            break
+        content_type = str(response.headers.get("Content-Type") or response.headers.get("content-type") or "")
+        if "application/json" in content_type:
+            payload = response.json()
+            if isinstance(payload, dict) and payload.get("code") not in (0, None):
+                errors.append(f"segment {segment_index}: {payload.get('message') or payload.get('code')}")
+                break
+        if not response.content:
+            continue
+        urls.append(f"{url}?type=1&oid={cid}&pid={aid}&segment_index={segment_index}")
+        segments.extend(_decode_bilibili_danmaku_segments(response.content, bvid=bvid))
+    return segments, urls, errors
+
+
+def _danmaku_xml_is_combined_resource(raw_xml: str) -> bool:
+    return "public-list.so" in raw_xml
+
+
+def _fetch_bilibili_danmaku(session: requests.Session, metadata: dict[str, Any]) -> tuple[str, list[dict[str, Any]], str, str, str]:
     bvid = str(metadata.get("bvid") or "")
     cid = str(metadata.get("cid") or "")
     if not cid:
-        return "", [], "", ""
-    danmaku_url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={cid}"
+        return "", [], "", "", ""
+    list_url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={cid}"
     response = session.get(
-        danmaku_url,
+        list_url,
         headers={**_bilibili_headers(bvid), "Accept": "application/xml,text/xml,*/*"},
         timeout=30,
     )
     response.raise_for_status()
     raw_xml = response.content.decode("utf-8", errors="replace")
-    danmaku_text, segments = _parse_bilibili_danmaku(raw_xml, bvid=bvid)
-    return danmaku_text, segments, danmaku_url, raw_xml
+    _, list_segments = _parse_bilibili_danmaku(raw_xml, bvid=bvid)
+    segmented_segments, segmented_urls, segmented_errors = _fetch_bilibili_segmented_danmaku(session, metadata)
+    segments = _merge_bilibili_danmaku_segments(list_segments, segmented_segments)
+    source_label = "public-list.so+web-seg.so" if segmented_urls else "public-list.so"
+    combined_xml = _format_bilibili_danmaku_xml(metadata, segments, source=source_label)
+    danmaku_text = "\n".join(str(segment["text"]) for segment in segments if str(segment.get("text") or "").strip())
+    urls = [list_url, *segmented_urls]
+    fetch_mode = "public_list_plus_web_segments" if segmented_urls else "public_list"
+    if segmented_errors:
+        fetch_mode += "_segmented_unavailable"
+    return danmaku_text, segments, " | ".join(urls), combined_xml, fetch_mode
 
 
 def _download_bilibili_audio(session: requests.Session, metadata: dict[str, Any]) -> Path:
@@ -936,6 +1159,7 @@ def sync_bilibili_video_source(
 
     export_root_path = Path(export_root)
     download_subtitles = bool(options.get("download_subtitles", True))
+    refresh_danmaku = bool(options.get("refresh_danmaku", False))
     transcript, segments, subtitle_url, raw_subtitle_text = _fetch_bilibili_subtitles(session, metadata)
     transcript_source = "official_subtitle" if transcript else ""
     asr_result: dict[str, Any] | None = None
@@ -945,6 +1169,7 @@ def sync_bilibili_video_source(
     danmaku_segments: list[dict[str, Any]] = []
     danmaku_url = ""
     danmaku_file = ""
+    danmaku_fetch_mode = ""
     errors: list[str] = []
 
     if raw_subtitle_text and download_subtitles:
@@ -977,10 +1202,13 @@ def sync_bilibili_video_source(
                 suffix=".danmaku.xml",
                 export_root=export_root_path,
             )
-            if raw_danmaku_xml:
+            if raw_danmaku_xml and not refresh_danmaku:
                 normalized_danmaku_xml = _normalize_bilibili_xml_text(raw_danmaku_xml)
                 if normalized_danmaku_xml != raw_danmaku_xml:
                     raw_danmaku_xml = normalized_danmaku_xml
+                danmaku_text, danmaku_segments = _parse_bilibili_danmaku(raw_danmaku_xml, bvid=bvid)
+                if not _danmaku_xml_is_combined_resource(raw_danmaku_xml):
+                    raw_danmaku_xml = _format_bilibili_danmaku_xml(metadata, danmaku_segments, source="public-list.so")
                     danmaku_file = _write_bilibili_text_resource(
                         source,
                         title=title,
@@ -989,10 +1217,17 @@ def sync_bilibili_video_source(
                         content=raw_danmaku_xml,
                         export_root=export_root_path,
                     )
-                danmaku_text, danmaku_segments = _parse_bilibili_danmaku(raw_danmaku_xml, bvid=bvid)
                 danmaku_url = f"https://api.bilibili.com/x/v1/dm/list.so?oid={metadata.get('cid') or ''}"
+                danmaku_fetch_mode = (
+                    "cache_public_list_plus_web_segments"
+                    if _danmaku_xml_is_combined_resource(raw_danmaku_xml) and "web-seg.so" in raw_danmaku_xml
+                    else "cache_public_list_reformatted"
+                )
             else:
-                danmaku_text, danmaku_segments, danmaku_url, raw_danmaku_xml = _fetch_bilibili_danmaku(session, metadata)
+                danmaku_text, danmaku_segments, danmaku_url, raw_danmaku_xml, danmaku_fetch_mode = _fetch_bilibili_danmaku(
+                    session,
+                    metadata,
+                )
                 danmaku_file = _write_bilibili_text_resource(
                     source,
                     title=title,
@@ -1055,6 +1290,8 @@ def sync_bilibili_video_source(
             "danmaku_url": danmaku_url,
             "danmaku_file": danmaku_file,
             "danmaku_count": len(danmaku_segments),
+            "danmaku_fetch_mode": danmaku_fetch_mode,
+            "danmaku_resource_scope": "public_bilibili_danmaku",
             "subtitle_resource_type": "official_subtitle" if raw_subtitle_file else ("danmaku" if danmaku_file else ""),
             "asr": {k: v for k, v in (asr_result or {}).items() if k not in {"segments", "text"}},
             "audio_path": audio_path,

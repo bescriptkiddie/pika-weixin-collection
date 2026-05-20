@@ -1,1 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?><i><chatserver>chat.bilibili.com</chatserver><chatid>38257953952</chatid><mission>0</mission><maxlimit>1000</maxlimit><state>0</state><real_name>0</real_name><source>k-v</source><d p="268.57500,1,25,16777215,1778516763,0,8e44ad6a,2109110491627439872,10">对，形态不好不进</d><d p="96.97400,1,25,16777215,1778508066,0,2be05034,2109037539905439744,7">马在哪？</d><d p="258.79700,1,25,16777215,1778493556,0,b11a5dfa,2108915819056205312,4">国产没有纯CPU，还不如买外面ETF</d></i>
+<?xml version="1.0" encoding="UTF-8"?>
+<i>
+  <chatserver>chat.bilibili.com</chatserver>
+  <chatid>38257953952</chatid>
+  <mission>0</mission>
+  <maxlimit>3</maxlimit>
+  <state>0</state>
+  <real_name>0</real_name>
+  <source>public-list.so+web-seg.so</source>
+  <d p="96.97400,1,25,16777215,1778508066,0,2be05034,2109037539905439744,7">马在哪？</d>
+  <d p="258.79700,1,25,16777215,1778493556,0,b11a5dfa,2108915819056205312,4">国产没有纯CPU，还不如买外面ETF</d>
+  <d p="268.57500,1,25,16777215,1778516763,0,8e44ad6a,2109110491627439872,10">对，形态不好不进</d>
+</i>
