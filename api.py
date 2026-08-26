@@ -1321,6 +1321,20 @@ def content_loop_items(
     )
 
 
+@app.get("/api/accounts/{name}/corpus")
+def account_analysis_corpus(name: str, limit: int = 20):
+    """Return a bounded full-text corpus for an explicitly selected account."""
+    from src.content_loop import build_wechat_account_corpus
+
+    try:
+        result = build_wechat_account_corpus(name, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result["coverage"]["total_articles"] == 0:
+        raise HTTPException(status_code=404, detail=f"公众号没有可分析文章：{name}")
+    return result
+
+
 @app.get("/api/sources")
 def list_unified_sources_api():
     """聚合公众号和外部源，返回统一 Source 读模型。"""

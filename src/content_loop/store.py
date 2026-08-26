@@ -219,6 +219,55 @@ def build_wechat_content_items(
     return items
 
 
+def build_wechat_account_corpus(
+    account: str,
+    *,
+    limit: int = 20,
+    message_info: dict[str, Any] | None = None,
+    detail_texts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a bounded, full-text corpus for one explicitly selected account."""
+    selected = str(account or "").strip()
+    if not selected:
+        raise ValueError("account is required")
+    take = max(1, min(int(limit or 20), 50))
+    rows = [
+        item for item in build_wechat_content_items(message_info, detail_texts)
+        if item.get("source_name") == selected
+    ]
+    rows.sort(
+        key=lambda row: str(row.get("published_at") or row.get("fetched_at") or ""),
+        reverse=True,
+    )
+    total_articles = len(rows)
+    with_content = sum(1 for row in rows if str(row.get("content_markdown") or "").strip())
+    substantial_articles = sum(1 for row in rows if len(str(row.get("content_markdown") or "").strip()) >= 500)
+    dates = [str(row.get("published_at") or "").strip() for row in rows if str(row.get("published_at") or "").strip()]
+    corpus = []
+    for row in rows[:take]:
+        corpus.append({
+            "id": row.get("id"),
+            "title": row.get("title"),
+            "url": row.get("url"),
+            "published_at": row.get("published_at"),
+            "summary": row.get("summary"),
+            "tags": row.get("tags") or [],
+            "content_markdown": row.get("content_markdown") or "",
+        })
+    return {
+        "account": selected,
+        "articles": corpus,
+        "coverage": {
+            "total_articles": total_articles,
+            "returned_articles": len(corpus),
+            "with_content": with_content,
+            "substantial_articles": substantial_articles,
+            "date_from": min(dates) if dates else "",
+            "date_to": max(dates) if dates else "",
+        },
+    }
+
+
 def upsert_content_items(
     items: list[dict[str, Any]],
     *,

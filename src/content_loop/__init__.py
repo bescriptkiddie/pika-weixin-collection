@@ -24,6 +24,7 @@ from .source_configs import (
 )
 from .ai_enrichment import ai_enrich_content_items, get_ai_enrichment_overview
 from .store import (
+    build_wechat_account_corpus,
     get_content_loop_overview,
     list_content_items,
     list_unified_sources,
@@ -45,6 +46,7 @@ __all__ = [
     "list_geo_variants",
     "update_geo_variant_status",
     "build_feedback_projection",
+    "build_wechat_account_corpus",
     "load_feedback_projection",
     "summarize_feedback_projection",
     "build_media_source_config",
