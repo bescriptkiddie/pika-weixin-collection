@@ -1,8 +1,9 @@
 [project]
 name = "pika-weixin-collection"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local WeChat Official Account collection, content-pool, and feedback workflow."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "apscheduler>=3.11.0",
